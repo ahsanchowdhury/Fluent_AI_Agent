@@ -1,0 +1,22 @@
+{
+  "name": "local-wp-ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local AI agent for reading WordPress plugin code and debugging a XAMPP site.",
+  "scripts": {
+    "start": "node src/index.js",
+    "doctor": "node scripts/doctor.js",
+    "plugins": "node scripts/list-plugins.js",
+    "files": "node scripts/list-files.js",
+    "read:file": "node scripts/read-file.js",
+    "debug:log": "node scripts/debug-log.js",
+    "lint:php": "node scripts/lint-php.js",
+    "wp:plugins": "node scripts/wp-plugins.js",
+    "browser:debug": "node scripts/browser-debug.js"
+  },
+  "dependencies": {
+    "openai": "^6.36.0",
+    "playwright": "^1.59.1"
+  }
+}
