@@ -17,7 +17,6 @@ const port = Number(process.env.AGENT_WEB_PORT || 3333);
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(dirname, "..", "web");
 const conversations = new Map();
-const pendingActions = new Map();
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(publicDir));
@@ -114,24 +113,10 @@ app.post("/api/chat", async (request, response) => {
   }
 
   try {
-    const pending = pendingActions.get(conversationId);
-    if (pending && isConfirmation(message)) {
-      const result = await executePendingAction(pending);
-      pendingActions.delete(conversationId);
+    const wordpressAction = await detectWordPressAction(message);
+    if (wordpressAction) {
+      const result = await executeWordPressAction(wordpressAction);
       response.json({ text: formatActionResult(result) });
-      return;
-    }
-
-    if (pending && isRejection(message)) {
-      pendingActions.delete(conversationId);
-      response.json({ text: "Okay, I cancelled the pending WordPress action." });
-      return;
-    }
-
-    const proposedAction = await detectWordPressAction(message);
-    if (proposedAction) {
-      pendingActions.set(conversationId, proposedAction);
-      response.json({ text: formatPendingAction(proposedAction) });
       return;
     }
 
@@ -155,7 +140,6 @@ app.post("/api/chat", async (request, response) => {
 app.post("/api/reset", (request, response) => {
   const conversationId = String(request.body?.conversationId || "default");
   conversations.delete(conversationId);
-  pendingActions.delete(conversationId);
   response.json({ ok: true });
 });
 
@@ -280,9 +264,9 @@ async function detectWordPressAction(message) {
   return null;
 }
 
-async function executePendingAction(action) {
+async function executeWordPressAction(action) {
   if (action.type === "noop") {
-    return action;
+    return { ok: true, message: action.message };
   }
 
   if (action.type === "plugin") {
@@ -296,32 +280,13 @@ async function executePendingAction(action) {
   return { ok: false, message: "Unknown pending action." };
 }
 
-function formatPendingAction(action) {
-  if (action.type === "noop") {
-    return action.message;
-  }
-
-  if (action.type === "plugin") {
-    const label = action.action === "activate" ? "activate" : "deactivate";
-    return [
-      `I can ${label} ${action.pluginName} (${action.pluginFile}).`,
-      "Reply `yes` to confirm, or `no` to cancel.",
-    ].join("\n");
-  }
-
-  if (action.type === "theme") {
-    return [
-      `I can activate the ${action.themeName} theme (${action.stylesheet}).`,
-      "Reply `yes` to confirm, or `no` to cancel.",
-    ].join("\n");
-  }
-
-  return "I could not prepare that action.";
-}
-
 function formatActionResult(result) {
   if (!result.ok) {
     return `Action failed: ${result.message || "Unknown error"}`;
+  }
+
+  if (result.message) {
+    return result.message;
   }
 
   if (result.plugin) {
@@ -357,14 +322,6 @@ function findTheme(themes, target) {
     const values = [theme.name, theme.stylesheet].map(normalize);
     return values.some((value) => value === normalizedTarget || value.includes(normalizedTarget) || normalizedTarget.includes(value));
   });
-}
-
-function isConfirmation(message) {
-  return /^(yes|y|confirm|do it|proceed)$/i.test(message.trim());
-}
-
-function isRejection(message) {
-  return /^(no|n|cancel|stop)$/i.test(message.trim());
 }
 
 function normalize(value) {
