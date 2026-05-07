@@ -79,7 +79,7 @@ activate WP Debug Hub plugin
 activate Twenty Twenty-Four theme
 ```
 
-The dashboard chat executes these plugin/theme state changes immediately when the request is clear, including deactivating all active plugins. Button controls still show browser confirmation, and CLI commands still require `--yes`.
+Dashboard chat, terminal chat, and `npm start -- "..."` execute these plugin/theme state changes immediately when the request is clear, including deactivating all active plugins. Button controls still show browser confirmation, and direct CLI commands still require `--yes`.
 
 Confirmed CLI actions:
 

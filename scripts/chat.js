@@ -5,6 +5,12 @@ import { collectDebugContext, analyzeDebugContext, saveDebugContext } from "../s
 import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listFiles, listPluginDirectories, readTextFile } from "../src/tools/filesystem.js";
+import {
+  detectWordPressAction,
+  executeWordPressAction,
+  formatActionResult,
+  rememberWordPressAction,
+} from "../src/wordpressActionRouter.js";
 
 loadEnv();
 const config = getConfig();
@@ -15,6 +21,9 @@ const rl = readline.createInterface({
   prompt: "\nYou> ",
 });
 let previousResponseId = null;
+const actionContext = new Map();
+const conversationId = "terminal-chat";
+const history = [];
 const isInteractive = Boolean(input.isTTY);
 
 printHeader();
@@ -79,12 +88,28 @@ for await (const line of rl) {
       continue;
     }
 
+    const wordpressAction = await detectWordPressAction(config, message, {
+      conversationId,
+      context: actionContext,
+      history,
+    });
+    if (wordpressAction) {
+      const result = await executeWordPressAction(config, wordpressAction);
+      rememberWordPressAction(actionContext, conversationId, wordpressAction, result);
+      const text = formatActionResult(result);
+      history.push({ role: "user", text: message }, { role: "assistant", text });
+      console.log(`\nAgent> ${text}`);
+      promptAgain();
+      continue;
+    }
+
     const result = await createAgentResponse(client, {
       input: message,
       config,
       previousResponseId,
     });
     previousResponseId = result.responseId;
+    history.push({ role: "user", text: message }, { role: "assistant", text: result.text });
     console.log(`\nAgent> ${result.text}`);
   } catch (error) {
     console.error(`\nError: ${error.message}`);

@@ -1,5 +1,6 @@
 import { getConfig, loadEnv, maskSecret } from "./env.js";
 import { askModel, createOpenAIClient } from "./openaiClient.js";
+import { detectWordPressAction, executeWordPressAction, formatActionResult } from "./wordpressActionRouter.js";
 
 loadEnv();
 const config = getConfig();
@@ -24,6 +25,13 @@ async function main() {
   }
 
   const client = createOpenAIClient(config);
+  const wordpressAction = await detectWordPressAction(config, prompt, { conversationId: "single-prompt" });
+  if (wordpressAction) {
+    const result = await executeWordPressAction(config, wordpressAction);
+    console.log(formatActionResult(result));
+    return;
+  }
+
   const answer = await askModel(client, { input: prompt, config });
   console.log(answer);
 }
