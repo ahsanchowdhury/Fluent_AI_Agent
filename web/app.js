@@ -5,6 +5,8 @@ const input = document.querySelector("#messageInput");
 const statusList = document.querySelector("#statusList");
 const pluginsList = document.querySelector("#pluginsList");
 const siteLabel = document.querySelector("#siteLabel");
+const syncBadge = document.querySelector("#syncBadge");
+const sendButton = document.querySelector("#sendButton");
 
 document.querySelector("#debugHome").addEventListener("click", () => runDebug(""));
 document.querySelector("#debugPathButton").addEventListener("click", () => {
@@ -19,15 +21,27 @@ form.addEventListener("submit", async (event) => {
   if (!text) return;
 
   input.value = "";
+  resizeInput();
   addMessage("user", text);
-  const pending = addMessage("assistant", "Thinking...");
+  setBusy(true);
+  const pending = addThinkingMessage();
 
   try {
     const result = await postJson("/api/chat", { conversationId, message: text });
-    pending.textContent = result.text || "(No response)";
+    setMessageText(pending, result.text || "(No response)");
   } catch (error) {
-    pending.textContent = `Error: ${error.message}`;
-    pending.classList.add("system");
+    setMessageText(pending, `Error: ${error.message}`);
+    pending.querySelector(".message").classList.add("system");
+  } finally {
+    setBusy(false);
+  }
+});
+
+input.addEventListener("input", resizeInput);
+input.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    form.requestSubmit();
   }
 });
 
@@ -43,6 +57,8 @@ async function loadStatus() {
   addStatus("Index", status.index.inSync ? "in sync" : "needs sync");
   addStatus("Files", `${status.index.fileCount}`);
   addStatus("Key", status.key);
+  syncBadge.textContent = status.index.inSync ? "Memory in sync" : "Memory needs sync";
+  syncBadge.className = `badge ${status.index.inSync ? "good" : "warn"}`;
 
   pluginsList.innerHTML = "";
   for (const plugin of status.plugins) {
@@ -54,32 +70,32 @@ async function loadStatus() {
 
 async function runDebug(path) {
   addMessage("system", `Running debug${path ? ` for ${path}` : " for homepage"}...`);
-  const pending = addMessage("assistant", "Collecting diagnostics...");
+  const pending = addThinkingMessage("Collecting diagnostics");
 
   try {
     const result = await postJson("/api/debug", { path });
-    pending.textContent = [
+    setMessageText(pending, [
       result.text,
       result.contextPath ? `\nDiagnostic context: ${result.contextPath}` : "",
       result.screenshotPath ? `Screenshot: ${result.screenshotPath}` : "",
-    ].filter(Boolean).join("\n");
+    ].filter(Boolean).join("\n"));
   } catch (error) {
-    pending.textContent = `Error: ${error.message}`;
-    pending.classList.add("system");
+    setMessageText(pending, `Error: ${error.message}`);
+    pending.querySelector(".message").classList.add("system");
   }
 }
 
 async function syncIndex() {
   addMessage("system", "Syncing code memory...");
-  const pending = addMessage("assistant", "Checking installed plugin files...");
+  const pending = addThinkingMessage("Checking installed plugin files");
 
   try {
     const result = await postJson("/api/index-sync", {});
-    pending.textContent = `${result.message}\nVector store: ${result.vectorStoreId || "unchanged"}`;
+    setMessageText(pending, `${result.message}\nVector store: ${result.vectorStoreId || "unchanged"}`);
     await loadStatus();
   } catch (error) {
-    pending.textContent = `Error: ${error.message}`;
-    pending.classList.add("system");
+    setMessageText(pending, `Error: ${error.message}`);
+    pending.querySelector(".message").classList.add("system");
   }
 }
 
@@ -97,12 +113,45 @@ function addStatus(label, value) {
 }
 
 function addMessage(role, text) {
+  const row = document.createElement("div");
+  row.className = `message-row ${role}`;
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  avatar.textContent = role === "user" ? "YOU" : role === "system" ? "SYS" : "AI";
   const message = document.createElement("div");
   message.className = `message ${role}`;
-  message.textContent = text;
-  messages.append(message);
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = `${role === "user" ? "You" : role === "system" ? "System" : "Agent"} · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  const body = document.createElement("div");
+  body.className = "body";
+  body.textContent = text;
+  message.append(meta, body);
+  row.append(avatar, message);
+  messages.append(row);
   messages.scrollTop = messages.scrollHeight;
-  return message;
+  return row;
+}
+
+function addThinkingMessage(label = "Thinking") {
+  const row = addMessage("assistant", "");
+  row.querySelector(".body").innerHTML = `${escapeHtml(label)} <span class="typing"><span></span><span></span><span></span></span>`;
+  return row;
+}
+
+function setMessageText(row, text) {
+  row.querySelector(".body").textContent = text;
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function setBusy(isBusy) {
+  sendButton.disabled = isBusy;
+  sendButton.textContent = isBusy ? "Sending" : "Send";
+}
+
+function resizeInput() {
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
 }
 
 async function fetchJson(url) {
