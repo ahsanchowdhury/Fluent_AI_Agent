@@ -27,7 +27,12 @@ export async function detectWordPressAction(config, message, options = {}) {
     };
   }
 
-  const pluginAction = normalized.match(/\b(reactivate|activate|enable|deactivate|disable)\b\s+(.+)/);
+  const multiPluginAction = detectRecentPluginsAction(normalized, options);
+  if (multiPluginAction) {
+    return multiPluginAction;
+  }
+
+  const pluginAction = normalized.match(/\b(reactivate|activate|enable|deactivagte|deactivate|disable)\b\s+(.+)/);
   const followUpPluginAction = detectPluginFollowUp(normalized, options);
 
   if ((pluginAction && !normalized.includes("theme")) || followUpPluginAction) {
@@ -42,20 +47,6 @@ export async function detectWordPressAction(config, message, options = {}) {
     const plugin = findPlugin(siteSummary.summary.plugins.items, target);
     if (!plugin) {
       return null;
-    }
-
-    if (plugin.active && action === "activate") {
-      return {
-        type: "noop",
-        message: `${plugin.name} is already active.`,
-      };
-    }
-
-    if (!plugin.active && action === "deactivate") {
-      return {
-        type: "noop",
-        message: `${plugin.name} is already inactive.`,
-      };
     }
 
     return {
@@ -109,6 +100,10 @@ export async function executeWordPressAction(config, action) {
     return changePluginStatus(config, action.pluginFile, action.action);
   }
 
+  if (action.type === "multi_plugins") {
+    return changeMultiplePluginStatuses(config, action.plugins, action.action);
+  }
+
   if (action.type === "all_plugins") {
     return changeAllPluginsStatus(config, action.action);
   }
@@ -124,6 +119,28 @@ export async function executeWordPressAction(config, action) {
   return { ok: false, message: "Unknown WordPress action." };
 }
 
+async function changeMultiplePluginStatuses(config, plugins, action) {
+  const results = [];
+
+  for (const plugin of plugins) {
+    const result = await changePluginStatus(config, plugin.pluginFile, action);
+    if (!result.ok) {
+      return result;
+    }
+    results.push({
+      plugin: result.plugin,
+      active: result.active,
+    });
+  }
+
+  return {
+    ok: true,
+    action: `${action}_plugins`,
+    changed: results.length,
+    results,
+  };
+}
+
 export function formatActionResult(result) {
   if (!result.ok) {
     return `Action failed: ${result.message || "Unknown error"}`;
@@ -135,6 +152,12 @@ export function formatActionResult(result) {
 
   if (result.plugin) {
     return `Done. ${result.plugin} is now ${result.active ? "active" : "inactive"}.`;
+  }
+
+  if (result.action === "activate_plugins" || result.action === "deactivate_plugins") {
+    const verb = result.action === "activate_plugins" ? "Activated" : "Deactivated";
+    const rows = result.results.map((item) => `- ${item.plugin}: ${item.active ? "active" : "inactive"}`).join("\n");
+    return `Done. ${verb} ${result.changed} plugin${result.changed === 1 ? "" : "s"}.\n\n${rows}`;
   }
 
   if (result.action === "deactivate_all_plugins") {
@@ -167,11 +190,26 @@ export function rememberWordPressAction(context, conversationId, action, result)
   }
 
   if (action.type === "plugin") {
+    const previous = context.get(conversationId) || {};
     context.set(conversationId, {
+      ...previous,
       type: "plugin",
       action: action.action,
       pluginFile: action.pluginFile,
       pluginName: action.pluginName,
+      recentPlugins: rememberRecentPlugin(previous.recentPlugins, action),
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
+  if (action.type === "multi_plugins") {
+    const previous = context.get(conversationId) || {};
+    context.set(conversationId, {
+      ...previous,
+      type: "plugin",
+      action: action.action,
+      recentPlugins: action.plugins,
       updatedAt: Date.now(),
     });
     return;
@@ -224,6 +262,80 @@ function detectAllPluginsAction(normalized) {
   }
 
   return null;
+}
+
+function detectRecentPluginsAction(normalized, options) {
+  if (/\b(how|snippet|code|example|write|explain|why)\b/.test(normalized)) {
+    return null;
+  }
+
+  if (!/\b(both|them|those|these)\b/.test(normalized) || !/\bplugins?\b/.test(normalized)) {
+    return null;
+  }
+
+  const actionMatch = normalized.match(/\b(reactivate|activate|enable|deactivagte|deactivate|disable)\b/);
+  if (!actionMatch) {
+    return null;
+  }
+
+  const recentPlugins = getRecentPlugins(options);
+  if (recentPlugins.length < 2) {
+    return null;
+  }
+
+  return {
+    type: "multi_plugins",
+    action: normalizeAction(actionMatch[1]),
+    plugins: recentPlugins.slice(0, 2),
+  };
+}
+
+function getRecentPlugins(options) {
+  const remembered = options.context?.get(options.conversationId);
+  if (remembered?.recentPlugins?.length) {
+    return remembered.recentPlugins;
+  }
+
+  const recent = [];
+  for (const item of [...(options.history || [])].reverse()) {
+    if (item?.role !== "assistant") {
+      continue;
+    }
+
+    for (const pluginFile of extractPluginFiles(item.text)) {
+      if (recent.some((plugin) => plugin.pluginFile === pluginFile)) {
+        continue;
+      }
+
+      recent.push({
+        pluginFile,
+        pluginName: pluginFile,
+      });
+
+      if (recent.length >= 5) {
+        return recent;
+      }
+    }
+  }
+
+  return recent;
+}
+
+function rememberRecentPlugin(recentPlugins = [], action) {
+  const next = [
+    {
+      pluginFile: action.pluginFile,
+      pluginName: action.pluginName,
+    },
+    ...recentPlugins.filter((plugin) => plugin.pluginFile !== action.pluginFile),
+  ];
+
+  return next.slice(0, 5);
+}
+
+function extractPluginFiles(text) {
+  const matches = String(text || "").match(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.php/g);
+  return matches || [];
 }
 
 function detectDebugLogAction(normalized) {
@@ -300,7 +412,7 @@ function getPreviousPluginAction(options) {
     }
 
     const normalized = normalize(item.text);
-    const match = normalized.match(/\b(reactivate|activate|enable|deactivate|disable)\b\s+(.+)/);
+    const match = normalized.match(/\b(reactivate|activate|enable|deactivagte|deactivate|disable)\b\s+(.+)/);
     if (match && !normalized.includes("theme")) {
       return normalizeAction(match[1]);
     }

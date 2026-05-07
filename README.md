@@ -74,6 +74,7 @@ You can also use chat for direct actions:
 ```txt
 deactivate Bit File Manager plugin
 same for Fluent Support Pro
+activate both plugins
 deactivate all plugins
 activate all plugins
 reactivate all plugins
