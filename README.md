@@ -165,3 +165,27 @@ Useful chat commands:
 /reset
 /exit
 ```
+
+## Safe Patch Mode
+
+Ask the agent to propose a patch:
+
+```bash
+npm run patch:propose -- "Fix the customer lookup nonce check in my-shop"
+```
+
+The proposal is saved under `memory/patches` and ignored by Git. Review it first.
+
+Check a reviewed patch without applying it:
+
+```bash
+npm run patch:check -- /absolute/path/to/memory/patches/123-proposal.patch
+```
+
+Apply a reviewed patch explicitly:
+
+```bash
+npm run patch:apply -- /absolute/path/to/memory/patches/123-proposal.patch
+```
+
+Patch application validates paths and runs `git apply --check` before changing files. Normal chat and debug commands remain read-only.

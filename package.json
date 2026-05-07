@@ -16,7 +16,10 @@
     "browser:debug": "node scripts/browser-debug.js",
     "index:code": "node scripts/index-code.js",
     "debug": "node scripts/debug.js",
-    "chat": "node scripts/chat.js"
+    "chat": "node scripts/chat.js",
+    "patch:propose": "node scripts/patch-propose.js",
+    "patch:check": "node scripts/patch-check.js",
+    "patch:apply": "node scripts/patch-apply.js"
   },
   "dependencies": {
     "openai": "^6.36.0",
