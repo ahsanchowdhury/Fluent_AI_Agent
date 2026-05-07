@@ -285,7 +285,7 @@ function appendMessage(messageData) {
   meta.textContent = `${messageData.role === "user" ? "You" : messageData.role === "system" ? "System" : "Agent"} · ${formatTime(messageData.createdAt)}`;
   const body = document.createElement("div");
   body.className = "body";
-  body.textContent = messageData.text;
+  renderMessageBody(body, messageData.text);
   const imageStrip = createImageStrip(messageData.images || []);
   message.append(meta, body, imageStrip);
   row.append(avatar, message);
@@ -301,7 +301,7 @@ function addThinkingMessage(label = "Thinking") {
 }
 
 function setMessageText(row, text) {
-  row.querySelector(".body").textContent = text;
+  renderMessageBody(row.querySelector(".body"), text);
   const messageId = row.dataset.messageId;
   const conversation = getActiveConversation();
   const storedMessage = conversation.messages.find((message) => message.id === messageId);
@@ -401,6 +401,39 @@ function createImageStrip(images = []) {
     strip.append(link);
   }
   return strip;
+}
+
+function renderMessageBody(element, text) {
+  element.textContent = "";
+  const value = String(text || "");
+  const urlPattern = /(https?:\/\/[^\s<>"']+)/g;
+  let lastIndex = 0;
+
+  for (const match of value.matchAll(urlPattern)) {
+    const url = match[0].replace(/[),.;:!?]+$/g, "");
+    const trailing = match[0].slice(url.length);
+
+    if (match.index > lastIndex) {
+      element.append(document.createTextNode(value.slice(lastIndex, match.index)));
+    }
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.textContent = url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    element.append(link);
+
+    if (trailing) {
+      element.append(document.createTextNode(trailing));
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < value.length) {
+    element.append(document.createTextNode(value.slice(lastIndex)));
+  }
 }
 
 function resizeInput() {
