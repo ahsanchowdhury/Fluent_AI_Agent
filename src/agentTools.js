@@ -72,7 +72,7 @@ export const agentTools = [
     type: "function",
     name: "search_files",
     description:
-      "Search readable local plugin files for words or phrases. Use this for support questions to verify whether a feature exists in Fluent Support first, then search other installed plugins for workarounds.",
+      "Search readable local plugin files for words or phrases. Use this for support questions to verify whether a feature exists in the primary plugin the client asks about, then search other installed plugins for workarounds.",
     strict: true,
     parameters: {
       type: "object",
