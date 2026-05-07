@@ -7,7 +7,7 @@ import { collectDebugContext, analyzeDebugContext, saveDebugContext } from "../s
 import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listPluginDirectories } from "../src/tools/filesystem.js";
-import { getWordPressSiteSummary } from "../src/tools/wordpress.js";
+import { activateTheme, changePluginStatus, getWordPressSiteSummary, listThemes } from "../src/tools/wordpress.js";
 
 loadEnv();
 const config = getConfig();
@@ -57,6 +57,50 @@ app.get("/api/site-summary", async (_request, response) => {
     return;
   }
   response.json(result.summary);
+});
+
+app.get("/api/themes", async (_request, response) => {
+  const result = await listThemes(config);
+  if (!result.ok) {
+    response.status(500).json({ error: result.message });
+    return;
+  }
+  response.json(result);
+});
+
+app.post("/api/plugin-action", async (request, response) => {
+  const pluginFile = String(request.body?.pluginFile || "").trim();
+  const action = String(request.body?.action || "").trim();
+  const confirmed = request.body?.confirmed === true;
+
+  if (!confirmed) {
+    response.status(400).json({ error: "Confirmation is required." });
+    return;
+  }
+
+  const result = await changePluginStatus(config, pluginFile, action);
+  if (!result.ok) {
+    response.status(500).json({ error: result.message || "Plugin action failed." });
+    return;
+  }
+  response.json(result);
+});
+
+app.post("/api/theme-action", async (request, response) => {
+  const stylesheet = String(request.body?.stylesheet || "").trim();
+  const confirmed = request.body?.confirmed === true;
+
+  if (!confirmed) {
+    response.status(400).json({ error: "Confirmation is required." });
+    return;
+  }
+
+  const result = await activateTheme(config, stylesheet);
+  if (!result.ok) {
+    response.status(500).json({ error: result.message || "Theme activation failed." });
+    return;
+  }
+  response.json(result);
 });
 
 app.post("/api/chat", async (request, response) => {

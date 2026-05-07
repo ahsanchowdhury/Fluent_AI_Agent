@@ -172,7 +172,8 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(15, 108, 189, 0.12);
 }
 
-.plugins ul {
+.plugins ul,
+.themes ul {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -182,13 +183,54 @@ textarea:focus {
   overflow-y: auto;
 }
 
-.plugins li {
+.plugins li,
+.themes li {
   border: 1px solid var(--line);
   border-radius: 9px;
   background: var(--surface-soft);
   padding: 8px 10px;
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+.manage-item {
+  display: grid;
+  gap: 8px;
+}
+
+.manage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.manage-name {
+  min-width: 0;
+  font-weight: 650;
+}
+
+.mini-button {
+  width: auto;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.mini-button.danger {
+  border-color: #b42318;
+  background: #b42318;
+}
+
+.mini-button.neutral {
+  border-color: var(--line);
+  background: white;
+  color: var(--ink);
+}
+
+.item-meta {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .chat {

@@ -4,6 +4,7 @@ const form = document.querySelector("#chatForm");
 const input = document.querySelector("#messageInput");
 const statusList = document.querySelector("#statusList");
 const pluginsList = document.querySelector("#pluginsList");
+const themesList = document.querySelector("#themesList");
 const siteLabel = document.querySelector("#siteLabel");
 const syncBadge = document.querySelector("#syncBadge");
 const sendButton = document.querySelector("#sendButton");
@@ -68,11 +69,12 @@ async function loadStatus() {
   syncBadge.className = `badge ${status.index.inSync ? "good" : "warn"}`;
 
   pluginsList.innerHTML = "";
-  for (const plugin of status.plugins) {
-    const item = document.createElement("li");
-    item.textContent = plugin.name;
-    pluginsList.append(item);
+  const sitePlugins = status.siteSummary?.plugins?.items || [];
+  for (const plugin of sitePlugins) {
+    pluginsList.append(createPluginItem(plugin));
   }
+
+  await loadThemes();
 }
 
 async function runDebug(path) {
@@ -110,6 +112,98 @@ async function resetChat() {
   await postJson("/api/reset", { conversationId });
   messages.innerHTML = "";
   addMessage("assistant", "Chat reset.");
+}
+
+async function loadThemes() {
+  try {
+    const result = await fetchJson("/api/themes");
+    themesList.innerHTML = "";
+    for (const theme of result.themes || []) {
+      themesList.append(createThemeItem(theme));
+    }
+  } catch (error) {
+    themesList.innerHTML = "";
+    const item = document.createElement("li");
+    item.textContent = `Theme list error: ${error.message}`;
+    themesList.append(item);
+  }
+}
+
+function createPluginItem(plugin) {
+  const item = document.createElement("li");
+  item.className = "manage-item";
+  const row = document.createElement("div");
+  row.className = "manage-row";
+  const name = document.createElement("div");
+  name.className = "manage-name";
+  name.textContent = plugin.name;
+  const button = document.createElement("button");
+  button.className = `mini-button ${plugin.active ? "danger" : "neutral"}`;
+  button.textContent = plugin.active ? "Deactivate" : "Activate";
+  button.addEventListener("click", () => changePlugin(plugin));
+  row.append(name, button);
+  const meta = document.createElement("div");
+  meta.className = "item-meta";
+  meta.textContent = `${plugin.active ? "Active" : "Inactive"} · ${plugin.file}`;
+  item.append(row, meta);
+  return item;
+}
+
+function createThemeItem(theme) {
+  const item = document.createElement("li");
+  item.className = "manage-item";
+  const row = document.createElement("div");
+  row.className = "manage-row";
+  const name = document.createElement("div");
+  name.className = "manage-name";
+  name.textContent = theme.name;
+  const button = document.createElement("button");
+  button.className = "mini-button neutral";
+  button.textContent = theme.active ? "Active" : "Activate";
+  button.disabled = theme.active;
+  button.addEventListener("click", () => activateTheme(theme));
+  row.append(name, button);
+  const meta = document.createElement("div");
+  meta.className = "item-meta";
+  meta.textContent = `${theme.stylesheet} · v${theme.version || "unknown"}`;
+  item.append(row, meta);
+  return item;
+}
+
+async function changePlugin(plugin) {
+  const action = plugin.active ? "deactivate" : "activate";
+  const ok = confirm(`${action === "deactivate" ? "Deactivate" : "Activate"} ${plugin.name}?`);
+  if (!ok) return;
+
+  addMessage("system", `${action === "deactivate" ? "Deactivating" : "Activating"} ${plugin.name}...`);
+  try {
+    const result = await postJson("/api/plugin-action", {
+      pluginFile: plugin.file,
+      action,
+      confirmed: true,
+    });
+    addMessage("assistant", `Plugin ${result.plugin} ${result.active ? "is active" : "is inactive"}.`);
+    await loadStatus();
+  } catch (error) {
+    addMessage("system", `Plugin action failed: ${error.message}`);
+  }
+}
+
+async function activateTheme(theme) {
+  const ok = confirm(`Activate theme ${theme.name}?`);
+  if (!ok) return;
+
+  addMessage("system", `Activating theme ${theme.name}...`);
+  try {
+    const result = await postJson("/api/theme-action", {
+      stylesheet: theme.stylesheet,
+      confirmed: true,
+    });
+    addMessage("assistant", `Active theme is now ${result.theme}.`);
+    await loadStatus();
+  } catch (error) {
+    addMessage("system", `Theme activation failed: ${error.message}`);
+  }
 }
 
 function addStatus(label, value) {

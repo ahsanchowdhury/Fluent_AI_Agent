@@ -65,6 +65,17 @@ http://127.0.0.1:3333
 
 The dashboard is bound to `127.0.0.1` for local use. It supports chat, debug, index status/sync, plugin listing, and chat reset.
 
+It also includes confirmed controls for activating/deactivating plugins and activating themes.
+
+Confirmed CLI actions:
+
+```bash
+npm run wp:plugin -- deactivate file-manager/file-manager.php --yes
+npm run wp:plugin -- activate file-manager/file-manager.php --yes
+npm run wp:theme -- list
+npm run wp:theme -- activate twentytwentyfive --yes
+```
+
 ## Read-Only Code Tools
 
 List detected plugins:

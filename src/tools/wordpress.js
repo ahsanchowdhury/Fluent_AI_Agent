@@ -185,6 +185,89 @@ export function getWordPressSiteSummary(config) {
   });
 }
 
+export function changePluginStatus(config, pluginFile, action) {
+  if (!["activate", "deactivate"].includes(action)) {
+    return Promise.resolve({ ok: false, message: `Unsupported plugin action: ${action}` });
+  }
+
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    if (!function_exists('get_plugins')) {
+      require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+    $plugin_file = ${JSON.stringify(pluginFile)};
+    $plugins = get_plugins();
+    if (!isset($plugins[$plugin_file])) {
+      echo wp_json_encode(array('ok' => false, 'message' => 'Plugin not found: ' . $plugin_file));
+      exit;
+    }
+    if (${JSON.stringify(action)} === 'activate') {
+      $result = activate_plugin($plugin_file);
+      if (is_wp_error($result)) {
+        echo wp_json_encode(array('ok' => false, 'message' => $result->get_error_message()));
+        exit;
+      }
+    } else {
+      deactivate_plugins($plugin_file);
+    }
+    echo wp_json_encode(array(
+      'ok' => true,
+      'action' => ${JSON.stringify(action)},
+      'plugin' => $plugin_file,
+      'active' => is_plugin_active($plugin_file),
+    ));
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode);
+}
+
+export function activateTheme(config, stylesheet) {
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    $stylesheet = ${JSON.stringify(stylesheet)};
+    $theme = wp_get_theme($stylesheet);
+    if (!$theme->exists()) {
+      echo wp_json_encode(array('ok' => false, 'message' => 'Theme not found: ' . $stylesheet));
+      exit;
+    }
+    switch_theme($stylesheet);
+    $active = wp_get_theme();
+    echo wp_json_encode(array(
+      'ok' => true,
+      'theme' => $active->get('Name'),
+      'stylesheet' => get_stylesheet(),
+      'template' => get_template(),
+    ));
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode);
+}
+
+export function listThemes(config) {
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    $themes = wp_get_themes();
+    $rows = array();
+    foreach ($themes as $stylesheet => $theme) {
+      $rows[] = array(
+        'stylesheet' => $stylesheet,
+        'name' => $theme->get('Name'),
+        'version' => $theme->get('Version'),
+        'active' => $stylesheet === get_stylesheet(),
+      );
+    }
+    usort($rows, function($a, $b) {
+      return strcasecmp($a['name'], $b['name']);
+    });
+    echo wp_json_encode(array('ok' => true, 'themes' => $rows));
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode);
+}
+
 function runCommand(command, args) {
   return new Promise((resolve) => {
     execFile(
@@ -208,4 +291,29 @@ function runCommand(command, args) {
 
 function $trimPhp(code) {
   return code.replace(/^\s+|\s+$/g, "");
+}
+
+function runWordPressJson(config, wpRoot, phpCode) {
+  return runCommand(config.phpBinary || "php", ["-r", $trimPhp(phpCode)]).then((result) => {
+    if (!result.ok) {
+      return {
+        ok: false,
+        wordpressRoot: wpRoot,
+        message: result.output,
+      };
+    }
+
+    try {
+      return {
+        wordpressRoot: wpRoot,
+        ...JSON.parse(result.output),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        wordpressRoot: wpRoot,
+        message: `WordPress action returned invalid JSON: ${error.message}\n${result.output}`,
+      };
+    }
+  });
 }
