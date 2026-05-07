@@ -223,31 +223,90 @@ export function changePluginStatus(config, pluginFile, action) {
 }
 
 export function changeAllPluginsStatus(config, action) {
-  if (action !== "deactivate") {
+  if (!["activate", "deactivate"].includes(action)) {
     return Promise.resolve({ ok: false, message: `Unsupported all-plugins action: ${action}` });
   }
 
   const wpRoot = getWordPressRoot(config.pluginRoot);
   const phpCode = `
     require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
-    if (!function_exists('deactivate_plugins')) {
+    if (!function_exists('get_plugins')) {
       require_once ABSPATH . 'wp-admin/includes/plugin.php';
     }
-    $active_plugins = (array) get_option('active_plugins', array());
-    if (!empty($active_plugins)) {
-      deactivate_plugins($active_plugins);
+    $action = ${JSON.stringify(action)};
+    $plugins = get_plugins();
+    $active_before = (array) get_option('active_plugins', array());
+    $active_lookup = array_fill_keys($active_before, true);
+    $changed = array();
+    $errors = array();
+    if ($action === 'activate') {
+      foreach (array_keys($plugins) as $plugin_file) {
+        if (isset($active_lookup[$plugin_file])) {
+          continue;
+        }
+        ob_start();
+        $result = activate_plugin($plugin_file);
+        ob_end_clean();
+        if (is_wp_error($result)) {
+          $errors[] = array('plugin' => $plugin_file, 'message' => $result->get_error_message());
+          continue;
+        }
+        if (is_plugin_active($plugin_file)) {
+          $changed[] = $plugin_file;
+        }
+      }
+    } else {
+      if (!empty($active_before)) {
+        deactivate_plugins($active_before);
+        $changed = array_values($active_before);
+      }
     }
     $active_after = (array) get_option('active_plugins', array());
     echo wp_json_encode(array(
       'ok' => true,
-      'action' => 'deactivate_all_plugins',
-      'count' => count($active_plugins),
-      'plugins' => array_values($active_plugins),
+      'action' => $action . '_all_plugins',
+      'count' => count($changed),
+      'plugins' => array_values($changed),
+      'errors' => $errors,
       'active_after' => count($active_after),
     ));
   `;
 
   return runWordPressJson(config, wpRoot, phpCode);
+}
+
+export function updateWordPressDebugLog(config, enabled) {
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const configPath = path.join(wpRoot, "wp-config.php");
+
+  if (!fs.existsSync(configPath)) {
+    return Promise.resolve({
+      ok: false,
+      message: `wp-config.php not found at ${configPath}`,
+      wordpressRoot: wpRoot,
+    });
+  }
+
+  const original = fs.readFileSync(configPath, "utf8");
+  const next = setWpConfigDefine(
+    enabled ? setWpConfigDefine(original, "WP_DEBUG", "true") : original,
+    "WP_DEBUG_LOG",
+    enabled ? "true" : "false"
+  );
+
+  if (next !== original) {
+    fs.writeFileSync(configPath, next);
+  }
+
+  return Promise.resolve({
+    ok: true,
+    action: enabled ? "enable_debug_log" : "disable_debug_log",
+    configPath,
+    changed: next !== original,
+    wpDebug: enabled ? true : readWpConfigBoolean(next, "WP_DEBUG"),
+    wpDebugLog: enabled,
+    wpDebugDisplay: readWpConfigBoolean(next, "WP_DEBUG_DISPLAY"),
+  });
 }
 
 export function activateTheme(config, stylesheet) {
@@ -319,6 +378,27 @@ function runCommand(command, args) {
 
 function $trimPhp(code) {
   return code.replace(/^\s+|\s+$/g, "");
+}
+
+function setWpConfigDefine(content, name, value) {
+  const definePattern = new RegExp(`define\\(\\s*['"]${name}['"]\\s*,\\s*(?:true|false|['"][^'"]*['"]|[^)]+)\\s*\\);`);
+  const defineLine = `define( '${name}', ${value} );`;
+
+  if (definePattern.test(content)) {
+    return content.replace(definePattern, defineLine);
+  }
+
+  const marker = "/* That's all, stop editing!";
+  if (content.includes(marker)) {
+    return content.replace(marker, `${defineLine}\n${marker}`);
+  }
+
+  return `${content.trimEnd()}\n${defineLine}\n`;
+}
+
+function readWpConfigBoolean(content, name) {
+  const match = content.match(new RegExp(`define\\(\\s*['"]${name}['"]\\s*,\\s*(true|false)\\s*\\);`, "i"));
+  return match ? match[1].toLowerCase() === "true" : null;
 }
 
 function runWordPressJson(config, wpRoot, phpCode) {

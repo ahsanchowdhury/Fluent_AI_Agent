@@ -75,11 +75,16 @@ You can also use chat for direct actions:
 deactivate Bit File Manager plugin
 same for Fluent Support Pro
 deactivate all plugins
+activate all plugins
+reactivate all plugins
 activate WP Debug Hub plugin
-activate Twenty Twenty-Four theme
+change theme to Twenty Twenty-Four
+switch to Twenty Twenty-Five
+enable debug log
+disable debug log
 ```
 
-Dashboard chat, terminal chat, and `npm start -- "..."` execute these plugin/theme state changes immediately when the request is clear, including deactivating all active plugins. Button controls still show browser confirmation, and direct CLI commands still require `--yes`.
+Dashboard chat, terminal chat, and `npm start -- "..."` execute these plugin/theme/debug-log state changes immediately when the request is clear. Button controls still show browser confirmation, and direct CLI commands still require `--yes`.
 
 Confirmed CLI actions:
 

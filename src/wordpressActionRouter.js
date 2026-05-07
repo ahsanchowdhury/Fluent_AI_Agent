@@ -4,10 +4,21 @@ import {
   changePluginStatus,
   getWordPressSiteSummary,
   listThemes,
+  updateWordPressDebugLog,
 } from "./tools/wordpress.js";
 
 export async function detectWordPressAction(config, message, options = {}) {
   const normalized = normalize(message);
+
+  const debugLogAction = detectDebugLogAction(normalized);
+  if (debugLogAction) {
+    return debugLogAction;
+  }
+
+  const allPluginsAction = detectAllPluginsAction(normalized);
+  if (allPluginsAction) {
+    return allPluginsAction;
+  }
 
   if (isDeactivateAllPluginsRequest(normalized)) {
     return {
@@ -16,7 +27,7 @@ export async function detectWordPressAction(config, message, options = {}) {
     };
   }
 
-  const pluginAction = normalized.match(/\b(activate|enable|deactivate|disable)\b\s+(.+)/);
+  const pluginAction = normalized.match(/\b(reactivate|activate|enable|deactivate|disable)\b\s+(.+)/);
   const followUpPluginAction = detectPluginFollowUp(normalized, options);
 
   if ((pluginAction && !normalized.includes("theme")) || followUpPluginAction) {
@@ -56,8 +67,10 @@ export async function detectWordPressAction(config, message, options = {}) {
   }
 
   const themeAction =
-    normalized.match(/\bactivate\b\s+theme\s+(.+)/) ||
-    normalized.match(/\bactivate\b\s+(.+?)\s+theme\b/);
+    normalized.match(/\b(?:activate|switch|change|set)\b\s+theme\s+(?:to\s+)?(.+)/) ||
+    normalized.match(/\b(?:activate|switch|change|set)\b\s+(.+?)\s+theme\b/) ||
+    normalized.match(/\bswitch\s+to\s+(.+)/) ||
+    normalized.match(/\bchange\s+to\s+(.+)/);
   if (themeAction) {
     const target = cleanTarget(themeAction[1]);
     const themes = await listThemes(config);
@@ -104,6 +117,10 @@ export async function executeWordPressAction(config, action) {
     return activateTheme(config, action.stylesheet);
   }
 
+  if (action.type === "debug_log") {
+    return updateWordPressDebugLog(config, action.enabled);
+  }
+
   return { ok: false, message: "Unknown WordPress action." };
 }
 
@@ -123,6 +140,18 @@ export function formatActionResult(result) {
   if (result.action === "deactivate_all_plugins") {
     const names = result.plugins?.length ? `\n\nDeactivated:\n${result.plugins.map((plugin) => `- ${plugin}`).join("\n")}` : "";
     return `Done. Deactivated ${result.count} active plugin${result.count === 1 ? "" : "s"}. Active plugins now: ${result.active_after}.${names}`;
+  }
+
+  if (result.action === "activate_all_plugins") {
+    const names = result.plugins?.length ? `\n\nActivated:\n${result.plugins.map((plugin) => `- ${plugin}`).join("\n")}` : "";
+    const errors = result.errors?.length
+      ? `\n\nCould not activate:\n${result.errors.map((error) => `- ${error.plugin}: ${error.message}`).join("\n")}`
+      : "";
+    return `Done. Activated ${result.count} plugin${result.count === 1 ? "" : "s"}. Active plugins now: ${result.active_after}.${names}${errors}`;
+  }
+
+  if (result.action === "enable_debug_log" || result.action === "disable_debug_log") {
+    return `Done. WordPress debug log is now ${result.wpDebugLog ? "enabled" : "disabled"}. WP_DEBUG is ${result.wpDebug ? "on" : "off"}.`;
   }
 
   if (result.theme) {
@@ -171,6 +200,62 @@ function isDeactivateAllPluginsRequest(normalized) {
   );
 }
 
+function detectAllPluginsAction(normalized) {
+  if (/\b(how|snippet|code|example|write|explain|why)\b/.test(normalized)) {
+    return null;
+  }
+
+  if (!/\b(all|every)\b/.test(normalized) || !/\bplugins?\b/.test(normalized)) {
+    return null;
+  }
+
+  if (/\b(reactivate|activate|enable)\b/.test(normalized)) {
+    return {
+      type: "all_plugins",
+      action: "activate",
+    };
+  }
+
+  if (/\b(deactivate|disable)\b/.test(normalized)) {
+    return {
+      type: "all_plugins",
+      action: "deactivate",
+    };
+  }
+
+  return null;
+}
+
+function detectDebugLogAction(normalized) {
+  if (/\b(how|snippet|code|example|write|explain|why)\b/.test(normalized)) {
+    return null;
+  }
+
+  const mentionsDebugLog =
+    /\bdebug\s+log\b/.test(normalized) ||
+    /\bwp\s+debug\s+log\b/.test(normalized) ||
+    (/\bdebug\b/.test(normalized) && /\blogging?\b/.test(normalized));
+  if (!mentionsDebugLog) {
+    return null;
+  }
+
+  if (/\b(enable|activate|turn on|start)\b/.test(normalized)) {
+    return {
+      type: "debug_log",
+      enabled: true,
+    };
+  }
+
+  if (/\b(disable|diable|deactivate|turn off|stop)\b/.test(normalized)) {
+    return {
+      type: "debug_log",
+      enabled: false,
+    };
+  }
+
+  return null;
+}
+
 function detectPluginFollowUp(normalized, options) {
   if (normalized.includes("theme")) {
     return null;
@@ -215,7 +300,7 @@ function getPreviousPluginAction(options) {
     }
 
     const normalized = normalize(item.text);
-    const match = normalized.match(/\b(activate|enable|deactivate|disable)\b\s+(.+)/);
+    const match = normalized.match(/\b(reactivate|activate|enable|deactivate|disable)\b\s+(.+)/);
     if (match && !normalized.includes("theme")) {
       return normalizeAction(match[1]);
     }
@@ -258,12 +343,12 @@ function findTheme(themes, target) {
 }
 
 function normalizeAction(action) {
-  return ["enable", "activate"].includes(action) ? "activate" : "deactivate";
+  return ["enable", "activate", "reactivate"].includes(action) ? "activate" : "deactivate";
 }
 
 function cleanTarget(value) {
   return value
-    ?.replace(/\b(plugin|plugins|extension|please|the)\b/g, " ")
+    ?.replace(/\b(plugin|plugins|extension|please|the|to)\b/g, " ")
     .replace(/\s+/g, " ")
     .trim() || "";
 }
