@@ -40,6 +40,7 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 const MAX_READ_BYTES = 250 * 1024;
+const MAX_SEARCH_FILE_BYTES = 500 * 1024;
 
 function isIgnoredFile(fileName) {
   return (
@@ -177,5 +178,63 @@ export function readTextFile(rootDir, targetPath) {
     path: relative,
     bytes: stat.size,
     content: fs.readFileSync(resolved, "utf8"),
+  };
+}
+
+export function searchTextFiles(rootDir, options = {}) {
+  const query = String(options.query || "").trim();
+  if (!query) {
+    throw new Error("Search query is required.");
+  }
+
+  const maxResults = Math.min(Math.max(Number(options.maxResults) || 40, 1), 120);
+  const caseSensitive = options.caseSensitive === true;
+  const terms = query
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter(Boolean);
+  const files = listFiles(rootDir, {
+    path: options.path || ".",
+    maxFiles: Math.min(Math.max(Number(options.maxFiles) || 1200, 1), 4000),
+  });
+  const results = [];
+
+  for (const relativePath of files) {
+    if (results.length >= maxResults) {
+      break;
+    }
+
+    const fullPath = path.join(rootDir, relativePath);
+    const stat = fs.statSync(fullPath);
+    if (stat.size > MAX_SEARCH_FILE_BYTES) {
+      continue;
+    }
+
+    const lines = fs.readFileSync(fullPath, "utf8").split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (results.length >= maxResults) {
+        break;
+      }
+
+      const line = lines[index];
+      const haystack = caseSensitive ? line : line.toLowerCase();
+      const matched = terms.every((term) => haystack.includes(caseSensitive ? term : term.toLowerCase()));
+      if (!matched) {
+        continue;
+      }
+
+      results.push({
+        path: relativePath,
+        line: index + 1,
+        text: line.trim().slice(0, 280),
+      });
+    }
+  }
+
+  return {
+    query,
+    path: options.path || ".",
+    count: results.length,
+    results,
   };
 }

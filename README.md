@@ -87,6 +87,8 @@ disable debug log
 
 Dashboard chat, terminal chat, and `npm start -- "..."` execute these plugin/theme/debug-log state changes immediately when the request is clear. Button controls still show browser confirmation, and direct CLI commands still require `--yes`.
 
+For client support questions, the agent checks the installed plugin list, verifies Fluent Support first when relevant, then searches other installed plugins for a workaround. For example, if a client asks about scheduled support emails, it can explain whether Fluent Support has that feature and whether FluentCRM can handle scheduled email campaigns or automations instead.
+
 Confirmed CLI actions:
 
 ```bash

@@ -2,6 +2,7 @@ import {
   listFiles,
   listPluginDirectories,
   readTextFile,
+  searchTextFiles,
 } from "./tools/filesystem.js";
 import {
   lintPhpFile,
@@ -64,6 +65,37 @@ export const agentTools = [
         },
       },
       required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "search_files",
+    description:
+      "Search readable local plugin files for words or phrases. Use this for support questions to verify whether a feature exists in Fluent Support first, then search other installed plugins for workarounds.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Relative plugin folder or '.' for all plugins, for example 'fluent-support' or 'fluent-crm'.",
+        },
+        query: {
+          type: "string",
+          description: "Words to search for, for example 'schedule email' or 'campaign schedule'.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of matches to return. Defaults to 40.",
+        },
+        maxFiles: {
+          type: "number",
+          description: "Maximum number of files to scan. Defaults to 1200.",
+        },
+      },
+      required: ["path", "query", "maxResults", "maxFiles"],
       additionalProperties: false,
     },
   },
@@ -183,6 +215,18 @@ export async function runAgentTool(config, toolCall) {
     if (toolCall.name === "read_file") {
       const file = readTextFile(config.pluginRoot, args.path);
       return toolResult(true, file);
+    }
+
+    if (toolCall.name === "search_files") {
+      return toolResult(
+        true,
+        searchTextFiles(config.pluginRoot, {
+          path: args.path || ".",
+          query: args.query || "",
+          maxResults: args.maxResults || 40,
+          maxFiles: args.maxFiles || 1200,
+        })
+      );
     }
 
     if (toolCall.name === "tail_debug_log") {
