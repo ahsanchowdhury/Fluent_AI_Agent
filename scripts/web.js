@@ -5,6 +5,7 @@ import { maybeAutoIndex } from "../src/autoIndex.js";
 import { buildIndexManifest, diffManifests, readSavedManifest, syncCodeVectorStore } from "../src/codeIndex.js";
 import { collectDebugContext, analyzeDebugContext, saveDebugContext } from "../src/debugWorkflow.js";
 import { getConfig, loadEnv, maskSecret } from "../src/env.js";
+import { localImageUrl, saveImageAttachments } from "../src/imageInputs.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listPluginDirectories } from "../src/tools/filesystem.js";
 import { activateTheme, changePluginStatus, getWordPressSiteSummary, listThemes } from "../src/tools/wordpress.js";
@@ -25,8 +26,28 @@ const publicDir = path.resolve(dirname, "..", "web");
 const conversations = new Map();
 const conversationActionContext = new Map();
 
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "40mb" }));
 app.use(express.static(publicDir));
+
+app.get("/api/local-image", (request, response) => {
+  const filePath = String(request.query?.path || "");
+  const resolvedPath = path.resolve(filePath);
+  const allowedRoots = [
+    path.resolve(process.cwd(), "memory", "screenshots"),
+    path.resolve(process.cwd(), "memory", "uploads"),
+  ];
+
+  if (!allowedRoots.some((root) => resolvedPath.startsWith(`${root}${path.sep}`))) {
+    response.status(403).send("Image is outside the agent memory folder.");
+    return;
+  }
+
+  response.sendFile(resolvedPath, (error) => {
+    if (error && !response.headersSent) {
+      response.status(404).send("Image not found.");
+    }
+  });
+});
 
 app.get("/api/status", async (_request, response) => {
   const current = buildIndexManifest(config, { path: "." });
@@ -114,9 +135,10 @@ app.post("/api/chat", async (request, response) => {
   const message = String(request.body?.message || "").trim();
   const conversationId = String(request.body?.conversationId || "default");
   const history = Array.isArray(request.body?.history) ? request.body.history : [];
+  const images = Array.isArray(request.body?.images) ? request.body.images : [];
 
-  if (!message) {
-    response.status(400).json({ error: "Message is required." });
+  if (!message && !images.length) {
+    response.status(400).json({ error: "Message or image is required." });
     return;
   }
 
@@ -141,10 +163,15 @@ app.post("/api/chat", async (request, response) => {
       input: message,
       config,
       previousResponseId: conversations.get(conversationId) || null,
+      images,
     });
 
     conversations.set(conversationId, result.responseId);
-    response.json({ text: result.text, responseId: result.responseId });
+    const savedImages = saveImageAttachments(images).map((image) => ({
+      ...image,
+      url: localImageUrl(image.path),
+    }));
+    response.json({ text: result.text, responseId: result.responseId, images: savedImages });
   } catch (error) {
     response.status(500).json({ error: error.message });
   }
@@ -183,6 +210,9 @@ app.post("/api/debug", async (request, response) => {
       screenshotPath: context.browser?.afterScreenshotPath || context.browser?.screenshotPath || "",
       beforeScreenshotPath: context.browser?.beforeScreenshotPath || "",
       afterScreenshotPath: context.browser?.afterScreenshotPath || "",
+      screenshotUrl: localImageUrl(context.browser?.afterScreenshotPath || context.browser?.screenshotPath || ""),
+      beforeScreenshotUrl: localImageUrl(context.browser?.beforeScreenshotPath || ""),
+      afterScreenshotUrl: localImageUrl(context.browser?.afterScreenshotPath || ""),
     });
   } catch (error) {
     response.status(500).json({ error: error.message });

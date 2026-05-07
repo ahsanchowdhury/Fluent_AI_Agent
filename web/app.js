@@ -11,6 +11,10 @@ const conversationList = document.querySelector("#conversationList");
 const siteLabel = document.querySelector("#siteLabel");
 const syncBadge = document.querySelector("#syncBadge");
 const sendButton = document.querySelector("#sendButton");
+const imageInput = document.querySelector("#imageInput");
+const attachImageButton = document.querySelector("#attachImageButton");
+const imagePreviewList = document.querySelector("#imagePreviewList");
+let selectedImages = [];
 
 document.querySelector("#debugHome").addEventListener("click", () => runDebug(""));
 document.querySelector("#debugPathButton").addEventListener("click", () => {
@@ -21,16 +25,22 @@ document.querySelector("#formTestButton").addEventListener("click", () => {
 });
 document.querySelector("#syncIndex").addEventListener("click", syncIndex);
 document.querySelector("#resetChat").addEventListener("click", resetChat);
+attachImageButton.addEventListener("click", () => imageInput.click());
+imageInput.addEventListener("change", handleImageSelection);
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = input.value.trim();
-  if (!text) return;
+  if (!text && !selectedImages.length) return;
 
   input.value = "";
+  const images = selectedImages;
+  selectedImages = [];
+  imageInput.value = "";
+  renderSelectedImages();
   resizeInput();
-  addMessage("user", text);
-  updateConversationTitle(text);
+  const userRow = addMessage("user", text || "Analyze attached image.", images);
+  updateConversationTitle(text || images[0]?.name || "Image analysis");
   setBusy(true);
   const pending = addThinkingMessage();
 
@@ -38,8 +48,12 @@ form.addEventListener("submit", async (event) => {
     const result = await postJson("/api/chat", {
       conversationId: activeConversationId,
       message: text,
+      images,
       history: getActiveConversation().messages.slice(-12),
     });
+    if (Array.isArray(result.images) && result.images.length) {
+      setMessageImages(userRow, result.images);
+    }
     setMessageText(pending, result.text || "(No response)");
     await loadStatus();
   } catch (error) {
@@ -103,6 +117,14 @@ async function runDebug(path, options = {}) {
       result.afterScreenshotPath ? `After screenshot: ${result.afterScreenshotPath}` : "",
       result.screenshotPath ? `Screenshot: ${result.screenshotPath}` : "",
     ].filter(Boolean).join("\n"));
+    setMessageImages(
+      pending,
+      [
+        result.beforeScreenshotUrl ? { name: "Before screenshot", url: result.beforeScreenshotUrl } : null,
+        result.afterScreenshotUrl ? { name: "After screenshot", url: result.afterScreenshotUrl } : null,
+        !result.afterScreenshotUrl && result.screenshotUrl ? { name: "Screenshot", url: result.screenshotUrl } : null,
+      ].filter(Boolean)
+    );
   } catch (error) {
     setMessageText(pending, `Error: ${error.message}`);
     pending.querySelector(".message").classList.add("system");
@@ -229,11 +251,17 @@ function addStatus(label, value) {
   statusList.append(row);
 }
 
-function addMessage(role, text) {
+function addMessage(role, text, images = []) {
   const messageData = {
     id: crypto.randomUUID(),
     role,
     text,
+    images: images.map((image) => ({
+      name: image.name,
+      url: image.url || image.dataUrl,
+      mimeType: image.mimeType,
+      size: image.size,
+    })),
     createdAt: new Date().toISOString(),
   };
   getActiveConversation().messages.push(messageData);
@@ -258,7 +286,8 @@ function appendMessage(messageData) {
   const body = document.createElement("div");
   body.className = "body";
   body.textContent = messageData.text;
-  message.append(meta, body);
+  const imageStrip = createImageStrip(messageData.images || []);
+  message.append(meta, body, imageStrip);
   row.append(avatar, message);
   messages.append(row);
   messages.scrollTop = messages.scrollHeight;
@@ -286,9 +315,92 @@ function setMessageText(row, text) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+function setMessageImages(row, images = []) {
+  const strip = row.querySelector(".message-images");
+  strip.replaceWith(createImageStrip(images));
+  const messageId = row.dataset.messageId;
+  const conversation = getActiveConversation();
+  const storedMessage = conversation.messages.find((message) => message.id === messageId);
+  if (storedMessage) {
+    storedMessage.images = images;
+    storedMessage.updatedAt = new Date().toISOString();
+    conversation.updatedAt = storedMessage.updatedAt;
+    saveConversations();
+    renderConversations();
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+
 function setBusy(isBusy) {
   sendButton.disabled = isBusy;
+  attachImageButton.disabled = isBusy;
   sendButton.textContent = isBusy ? "Sending" : "Send";
+}
+
+async function handleImageSelection(event) {
+  const files = [...event.target.files].slice(0, 4 - selectedImages.length);
+  const images = await Promise.all(files.map(readImageFile));
+  selectedImages = [...selectedImages, ...images.filter(Boolean)].slice(0, 4);
+  renderSelectedImages();
+}
+
+function readImageFile(file) {
+  return new Promise((resolve) => {
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type) || file.size > 8 * 1024 * 1024) {
+      resolve(null);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      name: file.name,
+      mimeType: file.type,
+      size: file.size,
+      dataUrl: reader.result,
+      url: URL.createObjectURL(file),
+    });
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderSelectedImages() {
+  imagePreviewList.innerHTML = "";
+  for (const image of selectedImages) {
+    const item = document.createElement("div");
+    item.className = "image-preview";
+    const img = document.createElement("img");
+    img.src = image.url || image.dataUrl;
+    img.alt = image.name;
+    const label = document.createElement("span");
+    label.textContent = image.name;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => {
+      selectedImages = selectedImages.filter((item) => item !== image);
+      renderSelectedImages();
+    });
+    item.append(img, label, remove);
+    imagePreviewList.append(item);
+  }
+}
+
+function createImageStrip(images = []) {
+  const strip = document.createElement("div");
+  strip.className = "message-images";
+  for (const image of images.filter((item) => item?.url)) {
+    const link = document.createElement("a");
+    link.href = image.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    const img = document.createElement("img");
+    img.src = image.url;
+    img.alt = image.name || "Attached image";
+    link.append(img);
+    strip.append(link);
+  }
+  return strip;
 }
 
 function resizeInput() {

@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { agentTools, runAgentTool } from "./agentTools.js";
+import { imageAttachmentsToContentItems } from "./imageInputs.js";
 import { getWordPressSiteSummary } from "./tools/wordpress.js";
 
 export function createOpenAIClient(config) {
@@ -17,9 +18,10 @@ export async function askModel(client, { input, config }) {
   return result.text;
 }
 
-export async function createAgentResponse(client, { input, config, previousResponseId = null }) {
+export async function createAgentResponse(client, { input, config, previousResponseId = null, images = [] }) {
   const tools = buildTools(config);
   const siteFacts = await buildSiteFacts(config);
+  const normalizedInput = buildUserInput(input, images);
   const request = {
     model: config.openaiModel,
     instructions: [
@@ -39,6 +41,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       "If the primary plugin lacks a feature but another installed plugin can solve the client need, explain that clearly as a workaround. Example: a ticketing plugin may not schedule outbound emails, but FluentCRM can schedule campaigns/automations if installed.",
       "When the client asks 'how do I...', answer in a support-friendly format: short answer, checked source, workaround if needed, and practical steps. Avoid exposing raw code details unless the user asks for developer details.",
       "When the user asks to test a form, says a form is not submitting, or shares a form page URL, use test_form_page rather than only debug_browser_page. Look for hidden required fields, HTML5 validity messages, visible validation errors, blocked submits, failed submit requests, and before/after screenshots.",
+      "When images or screenshots are attached, inspect the visible UI carefully. Use image evidence for layout issues, visible errors, missing fields, hidden-looking controls, plugin screens, and form behavior. Do not say you cannot read the image if image input is present.",
       "In the web dashboard, plugin/theme activation changes are handled by the local chat action workflow. Do not suggest WP-CLI first for those requests.",
       "You cannot edit files, run arbitrary shell commands, or inspect the database yet.",
       "Use tools when the user's question requires local plugin names or file contents.",
@@ -50,7 +53,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       siteFacts,
     ].join("\n"),
     tools,
-    input,
+    input: normalizedInput,
   };
 
   if (previousResponseId) {
@@ -92,6 +95,28 @@ export async function createAgentResponse(client, { input, config, previousRespo
     text: response.output_text || "",
     responseId: response.id,
   };
+}
+
+function buildUserInput(input, images = []) {
+  const text = String(input || "").trim() || "Please analyze the attached image.";
+  const imageItems = imageAttachmentsToContentItems(images);
+
+  if (!imageItems.length) {
+    return text;
+  }
+
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text,
+        },
+        ...imageItems,
+      ],
+    },
+  ];
 }
 
 function buildTools(config) {

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { imagePathToInputImage } from "./imageInputs.js";
 import { debugPage, testFormPage } from "./tools/browser.js";
 import {
   getWordPressRoot,
@@ -38,12 +39,14 @@ export async function collectDebugContext(config, options = {}) {
 }
 
 export async function analyzeDebugContext(client, config, context, userRequest) {
+  const screenshotItems = buildScreenshotItems(context);
   const response = await client.responses.create({
     model: config.openaiModel,
     instructions: [
       "You are a senior WordPress plugin debugging assistant.",
       "Analyze the provided diagnostic context. It was collected from browser automation, WordPress debug.log, WP-CLI, and plugin discovery.",
       "If browserMode is form_test, prioritize form field visibility, required hidden fields, validation messages, before/after screenshots, submit requests, and visible error messages. Console errors are only one signal.",
+      "Attached screenshots are part of the diagnostic evidence. Inspect them directly for visible validation messages, hidden-looking fields, broken layout, disabled buttons, overlays, admin notices, and mismatch between expected and actual UI.",
       "For hidden required fields, explain that no console error is expected because browser/form validation or plugin validation can block submission without JavaScript crashing.",
       config.openaiVectorStoreId
         ? "You also have indexed code memory through file_search. Use it if it helps connect an error to known code."
@@ -68,12 +71,24 @@ export async function analyzeDebugContext(client, config, context, userRequest) 
               JSON.stringify(context, null, 2),
             ].join("\n"),
           },
+          ...screenshotItems,
         ],
       },
     ],
   });
 
   return response.output_text || "";
+}
+
+function buildScreenshotItems(context) {
+  const paths = [
+    context.browser?.beforeScreenshotPath,
+    context.browser?.afterScreenshotPath,
+    context.browser?.screenshotPath,
+  ].filter(Boolean);
+
+  const uniquePaths = [...new Set(paths)];
+  return uniquePaths.map((filePath) => imagePathToInputImage(filePath)).filter(Boolean);
 }
 
 export function saveDebugContext(context) {

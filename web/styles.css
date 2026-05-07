@@ -33,6 +33,17 @@ textarea {
   font: inherit;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  padding: 0;
+}
+
 .app {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
@@ -385,7 +396,7 @@ textarea:focus {
 
 .composer-box {
   display: grid;
-  grid-template-columns: 1fr 92px;
+  grid-template-columns: 42px 1fr 92px;
   align-items: end;
   gap: 10px;
   max-width: 980px;
@@ -394,6 +405,17 @@ textarea:focus {
   border-radius: 14px;
   background: white;
   padding: 10px;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
 }
 
 .composer textarea {
@@ -408,6 +430,77 @@ textarea:focus {
 
 .composer textarea:focus {
   box-shadow: none;
+}
+
+.image-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-width: 980px;
+  margin: 0 auto 10px;
+}
+
+.image-preview {
+  display: grid;
+  grid-template-columns: 44px minmax(80px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  max-width: 340px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: white;
+  padding: 6px;
+}
+
+.image-preview img {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--surface-soft);
+}
+
+.image-preview span {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image-preview button {
+  border-color: transparent;
+  background: transparent;
+  color: #b42318;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.message-images:empty {
+  display: none;
+}
+
+.message-images a {
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-soft);
+}
+
+.message-images img {
+  display: block;
+  width: 180px;
+  max-width: 100%;
+  height: 120px;
+  object-fit: cover;
 }
 
 .typing {
