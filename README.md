@@ -49,6 +49,22 @@ npm run ai
 
 The launcher gives you quick access to chat, debug, index status/sync, plugin listing, patch proposal, and doctor checks.
 
+## Local Web Dashboard
+
+Start the chat-first local dashboard:
+
+```bash
+npm run web
+```
+
+Then open:
+
+```txt
+http://127.0.0.1:3333
+```
+
+The dashboard is bound to `127.0.0.1` for local use. It supports chat, debug, index status/sync, plugin listing, and chat reset.
+
 ## Read-Only Code Tools
 
 List detected plugins:

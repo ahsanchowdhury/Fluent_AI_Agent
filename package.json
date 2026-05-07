@@ -22,9 +22,11 @@
     "chat": "node scripts/chat.js",
     "patch:propose": "node scripts/patch-propose.js",
     "patch:check": "node scripts/patch-check.js",
-    "patch:apply": "node scripts/patch-apply.js"
+    "patch:apply": "node scripts/patch-apply.js",
+    "web": "node scripts/web.js"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "openai": "^6.36.0",
     "playwright": "^1.59.1"
   }
