@@ -106,3 +106,27 @@ npm run lint:php -- my-shop/my-shop-loyalty.php
 npm run wp:plugins
 npm run browser:debug
 ```
+
+## Code Memory
+
+Preview the files that would be uploaded to OpenAI file search:
+
+```bash
+npm run index:code
+```
+
+Index a specific plugin:
+
+```bash
+npm run index:code -- my-shop --yes
+```
+
+Index all supported plugin code files:
+
+```bash
+npm run index:code -- . --yes
+```
+
+The indexer creates an OpenAI vector store, uploads supported code files, saves the vector store ID in `memory/vector-store-id.txt`, and updates `.env` with `OPENAI_VECTOR_STORE_ID`.
+
+Generated memory files are ignored by Git.

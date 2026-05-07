@@ -14,6 +14,7 @@ const DEFAULT_IGNORE_DIRS = new Set([
   "build",
   "coverage",
   "memory",
+  "_local-ai-agent",
 ]);
 
 const TEXT_EXTENSIONS = new Set([

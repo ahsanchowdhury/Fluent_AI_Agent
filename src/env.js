@@ -51,6 +51,8 @@ export function getConfig() {
       process.env.WP_DEBUG_LOG ||
       "/Applications/XAMPP/xamppfiles/htdocs/sites/wp-content/debug.log",
     openaiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+    openaiVectorStoreId: process.env.OPENAI_VECTOR_STORE_ID || "",
+    indexMaxFiles: Number(process.env.INDEX_MAX_FILES || 300),
   };
 }
 

@@ -11,6 +11,7 @@ async function main() {
   console.log(`Plugin root: ${config.pluginRoot}`);
   console.log(`Local site: ${config.localSiteUrl}`);
   console.log(`Model: ${config.openaiModel}`);
+  console.log(`Code memory: ${config.openaiVectorStoreId || "not indexed"}`);
   console.log(`OpenAI key: ${config.openaiApiKey ? maskSecret(config.openaiApiKey) : "missing"}`);
   console.log("");
 

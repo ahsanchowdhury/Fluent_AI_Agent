@@ -35,6 +35,12 @@ async function main() {
   );
 
   line(
+    config.openaiVectorStoreId ? "ok" : "warn",
+    "OPENAI_VECTOR_STORE_ID",
+    config.openaiVectorStoreId || "Missing. Run `npm run index:code -- --yes` after reviewing the dry run."
+  );
+
+  line(
     pathExists(config.pluginRoot) ? "ok" : "fail",
     "PLUGIN_ROOT",
     config.pluginRoot
