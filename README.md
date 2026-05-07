@@ -67,6 +67,16 @@ The dashboard is bound to `127.0.0.1` for local use. It supports chat, debug, in
 
 It also includes confirmed controls for activating/deactivating plugins and activating themes.
 
+You can also use chat for confirmed actions:
+
+```txt
+deactivate Bit File Manager plugin
+activate WP Debug Hub plugin
+activate Twenty Twenty-Four theme
+```
+
+The dashboard will ask for `yes` before changing plugin or theme state.
+
 Confirmed CLI actions:
 
 ```bash
