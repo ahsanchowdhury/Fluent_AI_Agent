@@ -7,8 +7,9 @@ loadEnv();
 const config = getConfig();
 const args = process.argv.slice(2);
 const targetPath = args.find((arg) => !arg.startsWith("--")) || "";
+const formTest = args.includes("--form") || args.includes("--human") || args.includes("--test-form");
 const userRequest = args.length
-  ? `Debug local WordPress target: ${targetPath || "/"}`
+  ? `${formTest ? "Test form like a human on" : "Debug local WordPress target:"} ${targetPath || "/"}`
   : "Debug the configured local WordPress homepage.";
 
 if (config.autoIndexOnDebug) {
@@ -20,6 +21,7 @@ if (config.autoIndexOnDebug) {
 console.log("Collecting diagnostics...");
 const context = await collectDebugContext(config, {
   path: targetPath,
+  formTest,
   logLines: 120,
 });
 const contextPath = saveDebugContext(context);

@@ -16,6 +16,9 @@ document.querySelector("#debugHome").addEventListener("click", () => runDebug(""
 document.querySelector("#debugPathButton").addEventListener("click", () => {
   runDebug(document.querySelector("#debugPath").value.trim());
 });
+document.querySelector("#formTestButton").addEventListener("click", () => {
+  runDebug(document.querySelector("#debugPath").value.trim(), { formTest: true });
+});
 document.querySelector("#syncIndex").addEventListener("click", syncIndex);
 document.querySelector("#resetChat").addEventListener("click", resetChat);
 
@@ -87,15 +90,17 @@ async function loadStatus() {
   await loadThemes();
 }
 
-async function runDebug(path) {
-  addMessage("system", `Running debug${path ? ` for ${path}` : " for homepage"}...`);
-  const pending = addThinkingMessage("Collecting diagnostics");
+async function runDebug(path, options = {}) {
+  addMessage("system", `${options.formTest ? "Testing form" : "Running debug"}${path ? ` for ${path}` : " for homepage"}...`);
+  const pending = addThinkingMessage(options.formTest ? "Interacting with page" : "Collecting diagnostics");
 
   try {
-    const result = await postJson("/api/debug", { path });
+    const result = await postJson("/api/debug", { path, formTest: options.formTest === true });
     setMessageText(pending, [
       result.text,
       result.contextPath ? `\nDiagnostic context: ${result.contextPath}` : "",
+      result.beforeScreenshotPath ? `Before screenshot: ${result.beforeScreenshotPath}` : "",
+      result.afterScreenshotPath ? `After screenshot: ${result.afterScreenshotPath}` : "",
       result.screenshotPath ? `Screenshot: ${result.screenshotPath}` : "",
     ].filter(Boolean).join("\n"));
   } catch (error) {

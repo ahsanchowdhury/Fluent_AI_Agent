@@ -18,6 +18,7 @@
     "wp:theme": "node scripts/theme-action.js",
     "site:summary": "node scripts/site-summary.js",
     "browser:debug": "node scripts/browser-debug.js",
+    "form:test": "node scripts/form-test.js",
     "index:code": "node scripts/index-code.js",
     "index:sync": "node scripts/index-sync.js",
     "index:status": "node scripts/index-status.js",

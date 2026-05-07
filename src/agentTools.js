@@ -10,7 +10,7 @@ import {
   tailDebugLog,
   wpCliPluginList,
 } from "./tools/wordpress.js";
-import { debugPage } from "./tools/browser.js";
+import { debugPage, testFormPage } from "./tools/browser.js";
 
 const MAX_TOOL_OUTPUT_CHARS = 70000;
 
@@ -180,6 +180,25 @@ export const agentTools = [
       additionalProperties: false,
     },
   },
+  {
+    type: "function",
+    name: "test_form_page",
+    description:
+      "Act like a human tester on a page with forms: inspect visible/hidden/required fields, fill visible fields with safe test values, submit the first form, capture screenshots, and report validation blockers.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Relative path under LOCAL_SITE_URL, absolute URL, or empty string for the local site homepage.",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export async function runAgentTool(config, toolCall) {
@@ -247,6 +266,10 @@ export async function runAgentTool(config, toolCall) {
 
     if (toolCall.name === "debug_browser_page") {
       return toolResult(true, await debugPage(config, { path: args.path || "" }));
+    }
+
+    if (toolCall.name === "test_form_page") {
+      return toolResult(true, await testFormPage(config, { path: args.path || "" }));
     }
 
     return toolResult(false, `Unknown tool: ${toolCall.name}`);

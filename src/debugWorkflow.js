@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { debugPage } from "./tools/browser.js";
+import { debugPage, testFormPage } from "./tools/browser.js";
 import {
   getWordPressRoot,
   tailDebugLog,
@@ -11,7 +11,7 @@ import { listPluginDirectories } from "./tools/filesystem.js";
 export async function collectDebugContext(config, options = {}) {
   const pagePath = options.path || "";
   const [browser, wpCli] = await Promise.all([
-    debugPage(config, { path: pagePath }),
+    options.formTest ? testFormPage(config, { path: pagePath }) : debugPage(config, { path: pagePath }),
     wpCliPluginList(config.pluginRoot),
   ]);
 
@@ -30,6 +30,7 @@ export async function collectDebugContext(config, options = {}) {
       pluginRoot: config.pluginRoot,
     },
     browser,
+    browserMode: options.formTest ? "form_test" : "page_debug",
     debugLog,
     wpCli,
     plugins,
@@ -42,6 +43,8 @@ export async function analyzeDebugContext(client, config, context, userRequest) 
     instructions: [
       "You are a senior WordPress plugin debugging assistant.",
       "Analyze the provided diagnostic context. It was collected from browser automation, WordPress debug.log, WP-CLI, and plugin discovery.",
+      "If browserMode is form_test, prioritize form field visibility, required hidden fields, validation messages, before/after screenshots, submit requests, and visible error messages. Console errors are only one signal.",
+      "For hidden required fields, explain that no console error is expected because browser/form validation or plugin validation can block submission without JavaScript crashing.",
       config.openaiVectorStoreId
         ? "You also have indexed code memory through file_search. Use it if it helps connect an error to known code."
         : "No indexed code memory is available.",

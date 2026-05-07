@@ -159,25 +159,30 @@ app.post("/api/reset", (request, response) => {
 
 app.post("/api/debug", async (request, response) => {
   const targetPath = String(request.body?.path || "").trim();
+  const formTest = request.body?.formTest === true;
 
   try {
     if (config.autoIndexOnDebug) {
       await maybeAutoIndex(config, "web debug");
     }
 
-    const context = await collectDebugContext(config, { path: targetPath, logLines: 120 });
+    const context = await collectDebugContext(config, { path: targetPath, formTest, logLines: 120 });
     const contextPath = saveDebugContext(context);
     const text = await analyzeDebugContext(
       client,
       config,
       context,
-      targetPath ? `Debug local WordPress target: ${targetPath}` : "Debug the configured local WordPress homepage."
+      formTest
+        ? `Test form like a human on: ${targetPath || "/"}`
+        : targetPath ? `Debug local WordPress target: ${targetPath}` : "Debug the configured local WordPress homepage."
     );
 
     response.json({
       text,
       contextPath,
-      screenshotPath: context.browser?.screenshotPath || "",
+      screenshotPath: context.browser?.afterScreenshotPath || context.browser?.screenshotPath || "",
+      beforeScreenshotPath: context.browser?.beforeScreenshotPath || "",
+      afterScreenshotPath: context.browser?.afterScreenshotPath || "",
     });
   } catch (error) {
     response.status(500).json({ error: error.message });

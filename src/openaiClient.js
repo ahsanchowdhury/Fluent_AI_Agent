@@ -38,6 +38,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       "Do not use WP-CLI for ordinary plugin status or support questions because this local XAMPP site may need the XAMPP PHP runtime. Prefer get_wordpress_site_summary for installed/active plugin facts.",
       "If the primary plugin lacks a feature but another installed plugin can solve the client need, explain that clearly as a workaround. Example: a ticketing plugin may not schedule outbound emails, but FluentCRM can schedule campaigns/automations if installed.",
       "When the client asks 'how do I...', answer in a support-friendly format: short answer, checked source, workaround if needed, and practical steps. Avoid exposing raw code details unless the user asks for developer details.",
+      "When the user asks to test a form, says a form is not submitting, or shares a form page URL, use test_form_page rather than only debug_browser_page. Look for hidden required fields, HTML5 validity messages, visible validation errors, blocked submits, failed submit requests, and before/after screenshots.",
       "In the web dashboard, plugin/theme activation changes are handled by the local chat action workflow. Do not suggest WP-CLI first for those requests.",
       "You cannot edit files, run arbitrary shell commands, or inspect the database yet.",
       "Use tools when the user's question requires local plugin names or file contents.",

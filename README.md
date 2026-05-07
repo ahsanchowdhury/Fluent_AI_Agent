@@ -227,6 +227,13 @@ Run it against a relative path:
 npm run debug -- support-portal
 ```
 
+Test a form like a human by filling visible fields, submitting, checking hidden required fields, validation messages, submit requests, and before/after screenshots:
+
+```bash
+npm run form:test -- support-portal
+npm run debug -- support-portal --form
+```
+
 The workflow collects browser diagnostics, the latest WordPress debug log lines, WP-CLI plugin status, and local plugin discovery, then asks the model for a practical diagnosis. Diagnostic JSON is saved under `memory/diagnostics` and ignored by Git.
 
 ## Interactive Chat
