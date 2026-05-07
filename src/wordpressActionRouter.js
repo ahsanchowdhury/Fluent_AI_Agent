@@ -2,6 +2,7 @@ import {
   activateTheme,
   changeAllPluginsStatus,
   changePluginStatus,
+  createWordPressContent,
   getWordPressSiteSummary,
   installWordPressOrgPlugin,
   listThemes,
@@ -10,6 +11,16 @@ import {
 
 export async function detectWordPressAction(config, message, options = {}) {
   const normalized = normalize(message);
+
+  const pendingContentAction = detectPendingContentAction(message, normalized, options);
+  if (pendingContentAction) {
+    return pendingContentAction;
+  }
+
+  const contentAction = detectCreateContentAction(message, normalized);
+  if (contentAction) {
+    return contentAction;
+  }
 
   const debugLogAction = detectDebugLogAction(normalized);
   if (debugLogAction) {
@@ -126,6 +137,19 @@ export async function executeWordPressAction(config, action) {
     return updateWordPressDebugLog(config, action.enabled);
   }
 
+  if (action.type === "content_prompt") {
+    return {
+      ok: true,
+      action: "content_prompt",
+      pendingContent: action.pendingContent,
+      message: formatContentPrompt(action.pendingContent),
+    };
+  }
+
+  if (action.type === "create_content") {
+    return createWordPressContent(config, action);
+  }
+
   return { ok: false, message: "Unknown WordPress action." };
 }
 
@@ -193,6 +217,16 @@ export function formatActionResult(result) {
     return `Done. WordPress debug log is now ${result.wpDebugLog ? "enabled" : "disabled"}. WP_DEBUG is ${result.wpDebug ? "on" : "off"}.`;
   }
 
+  if (result.action === "create_content") {
+    const typeLabel = result.postType === "page" ? "page" : "post";
+    return [
+      `Done. Created ${typeLabel}: ${result.title}`,
+      `Status: ${result.status}`,
+      `View: ${result.permalink}`,
+      result.editUrl ? `Edit: ${result.editUrl}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
   if (result.theme) {
     return `Done. The active theme is now ${result.theme}.`;
   }
@@ -202,6 +236,39 @@ export function formatActionResult(result) {
 
 export function rememberWordPressAction(context, conversationId, action, result) {
   if (!context || !result.ok || action.type === "noop") {
+    return;
+  }
+
+  if (result.action === "content_prompt") {
+    const previous = context.get(conversationId) || {};
+    if (!result.pendingContent) {
+      const { pendingContent: _pendingContent, ...rest } = previous;
+      context.set(conversationId, {
+        ...rest,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    context.set(conversationId, {
+      ...previous,
+      pendingContent: result.pendingContent,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
+  if (action.type === "create_content") {
+    const previous = context.get(conversationId) || {};
+    const { pendingContent: _pendingContent, ...rest } = previous;
+    context.set(conversationId, {
+      ...rest,
+      type: "content",
+      postType: action.postType,
+      title: action.title,
+      id: result.id,
+      updatedAt: Date.now(),
+    });
     return;
   }
 
@@ -269,6 +336,160 @@ function isDeactivateAllPluginsRequest(normalized) {
     /\b(all|every)\b/.test(normalized) &&
     /\bplugins?\b/.test(normalized)
   );
+}
+
+function detectPendingContentAction(message, normalized, options) {
+  const pendingContent = options.context?.get(options.conversationId)?.pendingContent;
+  if (!pendingContent) {
+    return null;
+  }
+
+  if (/\b(cancel|stop|never mind|nevermind)\b/.test(normalized)) {
+    return {
+      type: "content_prompt",
+      pendingContent: null,
+      message: "Okay, cancelled the page/post creation request.",
+    };
+  }
+
+  const extracted = extractContentDetails(message);
+  const next = {
+    ...pendingContent,
+    ...Object.fromEntries(Object.entries(extracted).filter(([, value]) => value)),
+  };
+
+  if (!next.postType) {
+    if (/\bpage\b/.test(normalized)) {
+      next.postType = "page";
+    } else if (/\bpost\b/.test(normalized) || /\bblog\b/.test(normalized)) {
+      next.postType = "post";
+    }
+  }
+
+  if (next.title && !next.content && !extracted.content && !extracted.title) {
+    next.content = String(message || "").trim();
+  } else if (!next.title && next.content && !extracted.content && !extracted.title) {
+    next.title = String(message || "").trim();
+  } else if (!next.title && !next.content) {
+    next.title = String(message || "").trim();
+  }
+
+  if (!next.postType || !next.title || !next.content) {
+    return {
+      type: "content_prompt",
+      pendingContent: next,
+    };
+  }
+
+  return {
+    type: "create_content",
+    postType: next.postType,
+    title: next.title,
+    content: next.content,
+    status: next.status || "publish",
+  };
+}
+
+function detectCreateContentAction(message, normalized) {
+  if (/\b(how|snippet|code|example|write|explain|why)\b/.test(normalized)) {
+    return null;
+  }
+
+  const wantsCreate = /\b(create|make|add|publish|draft)\b/.test(normalized);
+  const mentionsContent = /\b(page|post|blog post|article)\b/.test(normalized);
+  if (!wantsCreate || !mentionsContent) {
+    return null;
+  }
+
+  const postType = /\bpage\b/.test(normalized) ? "page" : "post";
+  const status = /\bdraft\b/.test(normalized) ? "draft" : "publish";
+  const details = extractContentDetails(message);
+  const pendingContent = {
+    postType,
+    status,
+    title: details.title || "",
+    content: details.content || "",
+  };
+
+  if (!pendingContent.title || !pendingContent.content) {
+    return {
+      type: "content_prompt",
+      pendingContent,
+    };
+  }
+
+  return {
+    type: "create_content",
+    postType,
+    status,
+    title: pendingContent.title,
+    content: pendingContent.content,
+  };
+}
+
+function extractContentDetails(message) {
+  const text = String(message || "").trim();
+  const title =
+    extractLabelValue(text, ["title", "page title", "post title"]) ||
+    extractQuotedTitle(text) ||
+    "";
+  const content =
+    extractLabelValue(text, ["content", "body", "description", "page content", "post content"]) ||
+    "";
+
+  return {
+    title: cleanContentValue(title),
+    content: cleanContentValue(content),
+  };
+}
+
+function extractLabelValue(text, labels) {
+  for (const label of labels) {
+    const pattern = new RegExp(
+      `(?:^|\\n|\\b)${escapeRegExp(label)}\\s*[:=-]\\s*([\\s\\S]*?)(?=\\n\\s*(?:title|page title|post title|content|body|description|page content|post content)\\s*[:=-]|$)`,
+      "i"
+    );
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+
+  return "";
+}
+
+function extractQuotedTitle(text) {
+  const match =
+    text.match(/\b(?:page|post|blog post|article)\s+(?:called|named|title[d]?)\s+["“]([^"”]+)["”]/i) ||
+    text.match(/\b(?:called|named|title[d]?)\s+["“]([^"”]+)["”]/i);
+  return match?.[1] || "";
+}
+
+function cleanContentValue(value) {
+  return String(value || "")
+    .replace(/\s*\b(?:please|thanks|thank you)\s*$/i, "")
+    .trim();
+}
+
+function formatContentPrompt(pendingContent) {
+  if (!pendingContent) {
+    return "Okay, cancelled the page/post creation request.";
+  }
+
+  const typeLabel = pendingContent.postType || "page or post";
+  const missing = [];
+  if (!pendingContent.postType) missing.push("type: page or post");
+  if (!pendingContent.title) missing.push("title");
+  if (!pendingContent.content) missing.push("content");
+
+  return [
+    `Sure. I can create the ${typeLabel}.`,
+    `Please send the ${missing.join(" and ")}.`,
+    "",
+    "You can reply like this:",
+    `Title: ${pendingContent.postType === "post" ? "My Blog Post" : "About Us"}`,
+    `Content: Write the ${pendingContent.postType === "post" ? "post" : "page"} content here.`,
+  ].join("\n");
 }
 
 function detectAllPluginsAction(normalized) {
@@ -536,6 +757,10 @@ function normalize(value) {
     .replace(/[^a-z0-9/]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function pluginMatchScore(values, normalizedTarget) {

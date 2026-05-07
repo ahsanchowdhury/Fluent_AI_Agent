@@ -276,6 +276,68 @@ export function changeAllPluginsStatus(config, action) {
   return runWordPressJson(config, wpRoot, phpCode);
 }
 
+export function createWordPressContent(config, options = {}) {
+  const postType = String(options.postType || "").trim();
+  const title = String(options.title || "").trim();
+  const content = String(options.content || "").trim();
+  const status = String(options.status || "publish").trim();
+
+  if (!["page", "post"].includes(postType)) {
+    return Promise.resolve({ ok: false, message: "Content type must be page or post." });
+  }
+
+  if (!title) {
+    return Promise.resolve({ ok: false, message: "Title is required." });
+  }
+
+  if (!content) {
+    return Promise.resolve({ ok: false, message: "Content is required." });
+  }
+
+  if (!["publish", "draft", "pending", "private"].includes(status)) {
+    return Promise.resolve({ ok: false, message: `Unsupported post status: ${status}` });
+  }
+
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    $post_type = ${JSON.stringify(postType)};
+    $title = ${JSON.stringify(title)};
+    $content = ${JSON.stringify(content)};
+    $status = ${JSON.stringify(status)};
+
+    if (!post_type_exists($post_type)) {
+      echo wp_json_encode(array('ok' => false, 'message' => 'Post type not found: ' . $post_type));
+      exit;
+    }
+
+    $post_id = wp_insert_post(array(
+      'post_type' => $post_type,
+      'post_title' => sanitize_text_field($title),
+      'post_content' => wp_kses_post($content),
+      'post_status' => $status,
+    ), true);
+
+    if (is_wp_error($post_id)) {
+      echo wp_json_encode(array('ok' => false, 'message' => $post_id->get_error_message()));
+      exit;
+    }
+
+    echo wp_json_encode(array(
+      'ok' => true,
+      'action' => 'create_content',
+      'postType' => $post_type,
+      'id' => (int) $post_id,
+      'title' => get_the_title($post_id),
+      'status' => get_post_status($post_id),
+      'permalink' => get_permalink($post_id),
+      'editUrl' => get_edit_post_link($post_id, 'raw'),
+    ));
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode);
+}
+
 export async function installWordPressOrgPlugin(config, query, options = {}) {
   const pluginQuery = String(query || "").trim();
   if (!pluginQuery) {
