@@ -3,6 +3,7 @@ import {
   changeAllPluginsStatus,
   changePluginStatus,
   getWordPressSiteSummary,
+  installWordPressOrgPlugin,
   listThemes,
   updateWordPressDebugLog,
 } from "./tools/wordpress.js";
@@ -18,6 +19,11 @@ export async function detectWordPressAction(config, message, options = {}) {
   const allPluginsAction = detectAllPluginsAction(normalized);
   if (allPluginsAction) {
     return allPluginsAction;
+  }
+
+  const installPluginAction = detectInstallPluginAction(normalized);
+  if (installPluginAction) {
+    return installPluginAction;
   }
 
   if (isDeactivateAllPluginsRequest(normalized)) {
@@ -100,6 +106,10 @@ export async function executeWordPressAction(config, action) {
     return changePluginStatus(config, action.pluginFile, action.action);
   }
 
+  if (action.type === "install_plugin") {
+    return installWordPressOrgPlugin(config, action.query, { activate: action.activate });
+  }
+
   if (action.type === "multi_plugins") {
     return changeMultiplePluginStatuses(config, action.plugins, action.action);
   }
@@ -148,6 +158,12 @@ export function formatActionResult(result) {
 
   if (result.message) {
     return result.message;
+  }
+
+  if (result.action === "install_plugin") {
+    const installedText = result.already_installed ? "was already installed" : "was installed";
+    const activeText = result.activated ? ` and is now ${result.active ? "active" : "inactive"}` : "";
+    return `Done. ${result.name || result.slug} ${installedText}${activeText}.\n\nPlugin file: ${result.plugin}${result.version ? `\nVersion: ${result.version}` : ""}`;
   }
 
   if (result.plugin) {
@@ -215,6 +231,23 @@ export function rememberWordPressAction(context, conversationId, action, result)
     return;
   }
 
+  if (action.type === "install_plugin" && result.plugin) {
+    const previous = context.get(conversationId) || {};
+    context.set(conversationId, {
+      ...previous,
+      type: "plugin",
+      action: "activate",
+      pluginFile: result.plugin,
+      pluginName: result.name || action.query,
+      recentPlugins: rememberRecentPlugin(previous.recentPlugins, {
+        pluginFile: result.plugin,
+        pluginName: result.name || action.query,
+      }),
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
   if (action.type === "theme") {
     context.set(conversationId, {
       type: "theme",
@@ -262,6 +295,35 @@ function detectAllPluginsAction(normalized) {
   }
 
   return null;
+}
+
+function detectInstallPluginAction(normalized) {
+  if (/\b(how|snippet|code|example|write|explain|why)\b/.test(normalized)) {
+    return null;
+  }
+
+  const installMatch =
+    normalized.match(/\binstall\s+(.+?)\s+plugin\b/) ||
+    normalized.match(/\badd\s+new\s+(.+?)\s+plugin\b/) ||
+    normalized.match(/\b(?:install|add)\s+(?:new\s+)?plugin\s+(.+)/);
+  if (!installMatch) {
+    return null;
+  }
+
+  const query = installMatch[1]
+    .replace(/\b(and|then|also)?\s*(activate|enable|reactivate)\s*(it|plugin)?\b/g, " ")
+    .replace(/\s+plugin\s*$/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!query) {
+    return null;
+  }
+
+  return {
+    type: "install_plugin",
+    query,
+    activate: true,
+  };
 }
 
 function detectRecentPluginsAction(normalized, options) {

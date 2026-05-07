@@ -275,6 +275,166 @@ export function changeAllPluginsStatus(config, action) {
   return runWordPressJson(config, wpRoot, phpCode);
 }
 
+export function installWordPressOrgPlugin(config, query, options = {}) {
+  const pluginQuery = String(query || "").trim();
+  if (!pluginQuery) {
+    return Promise.resolve({ ok: false, message: "Plugin name or slug is required." });
+  }
+
+  const activate = options.activate !== false;
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
+    require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/misc.php';
+
+    $query = ${JSON.stringify(pluginQuery)};
+    $activate = ${activate ? "true" : "false"};
+    $slug = sanitize_title($query);
+    $info = plugins_api('plugin_information', array(
+      'slug' => $slug,
+      'fields' => array(
+        'sections' => false,
+        'description' => false,
+        'ratings' => false,
+        'reviews' => false,
+      ),
+    ));
+
+    if (is_wp_error($info)) {
+      $search = plugins_api('query_plugins', array(
+        'search' => $query,
+        'per_page' => 5,
+        'fields' => array(
+          'sections' => false,
+          'description' => false,
+          'ratings' => false,
+          'reviews' => false,
+        ),
+      ));
+
+      if (is_wp_error($search) || empty($search->plugins)) {
+        $message = is_wp_error($search) ? $search->get_error_message() : 'No WordPress.org plugin matched: ' . $query;
+        echo wp_json_encode(array('ok' => false, 'message' => $message));
+        exit;
+      }
+
+      $selected = $search->plugins[0];
+      foreach ($search->plugins as $candidate) {
+        if (isset($candidate['slug']) && strtolower($candidate['slug']) === strtolower($slug)) {
+          $selected = $candidate;
+          break;
+        }
+        if (isset($candidate['name']) && strtolower($candidate['name']) === strtolower($query)) {
+          $selected = $candidate;
+          break;
+        }
+      }
+      $slug = $selected['slug'];
+      $info = plugins_api('plugin_information', array(
+        'slug' => $slug,
+        'fields' => array(
+          'sections' => false,
+          'description' => false,
+          'ratings' => false,
+          'reviews' => false,
+        ),
+      ));
+    }
+
+    if (is_wp_error($info)) {
+      echo wp_json_encode(array('ok' => false, 'message' => $info->get_error_message()));
+      exit;
+    }
+
+    $plugins_before = get_plugins();
+    $plugin_file = fluent_ai_find_plugin_file($slug, $plugins_before);
+    $installed = (bool) $plugin_file;
+    $install_output = '';
+
+    if (!$installed) {
+      if (empty($info->download_link)) {
+        echo wp_json_encode(array('ok' => false, 'message' => 'No download link found for plugin: ' . $slug));
+        exit;
+      }
+
+      $skin = new Automatic_Upgrader_Skin();
+      $upgrader = new Plugin_Upgrader($skin);
+      ob_start();
+      $install_result = $upgrader->install($info->download_link);
+      $install_output = trim(ob_get_clean());
+
+      if (is_wp_error($install_result)) {
+        echo wp_json_encode(array('ok' => false, 'message' => $install_result->get_error_message(), 'output' => $install_output));
+        exit;
+      }
+
+      if (!$install_result) {
+        $message = method_exists($skin, 'get_errors') && is_wp_error($skin->get_errors()) && $skin->get_errors()->has_errors()
+          ? $skin->get_errors()->get_error_message()
+          : 'Plugin install failed.';
+        echo wp_json_encode(array('ok' => false, 'message' => $message, 'output' => $install_output));
+        exit;
+      }
+
+      wp_cache_flush();
+      $plugin_file = fluent_ai_find_plugin_file($slug, get_plugins());
+    }
+
+    if (!$plugin_file) {
+      echo wp_json_encode(array('ok' => false, 'message' => 'Plugin installed but main file could not be detected for: ' . $slug));
+      exit;
+    }
+
+    $active = is_plugin_active($plugin_file);
+    if ($activate && !$active) {
+      ob_start();
+      $activate_result = activate_plugin($plugin_file);
+      ob_end_clean();
+      if (is_wp_error($activate_result)) {
+        echo wp_json_encode(array('ok' => false, 'message' => $activate_result->get_error_message(), 'plugin' => $plugin_file));
+        exit;
+      }
+      $active = is_plugin_active($plugin_file);
+    }
+
+    echo wp_json_encode(array(
+      'ok' => true,
+      'action' => 'install_plugin',
+      'query' => $query,
+      'slug' => $slug,
+      'name' => $info->name ?? $slug,
+      'version' => $info->version ?? '',
+      'plugin' => $plugin_file,
+      'installed' => true,
+      'already_installed' => $installed,
+      'activated' => $activate,
+      'active' => $active,
+    ));
+
+    function fluent_ai_find_plugin_file($slug, $plugins) {
+      $fallback = '';
+      foreach ($plugins as $file => $plugin) {
+        $folder = dirname($file);
+        if ($folder === $slug) {
+          if (!$fallback) {
+            $fallback = $file;
+          }
+          if (basename($file, '.php') === $slug) {
+            return $file;
+          }
+        }
+      }
+      return $fallback;
+    }
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode, { timeout: 120000 });
+}
+
 export function updateWordPressDebugLog(config, enabled) {
   const wpRoot = getWordPressRoot(config.pluginRoot);
   const configPath = path.join(wpRoot, "wp-config.php");
@@ -355,13 +515,13 @@ export function listThemes(config) {
   return runWordPressJson(config, wpRoot, phpCode);
 }
 
-function runCommand(command, args) {
+function runCommand(command, args, options = {}) {
   return new Promise((resolve) => {
     execFile(
       command,
       args,
       {
-        timeout: 15000,
+        timeout: options.timeout || 15000,
         maxBuffer: 1024 * 1024,
       },
       (error, stdout, stderr) => {
@@ -401,8 +561,8 @@ function readWpConfigBoolean(content, name) {
   return match ? match[1].toLowerCase() === "true" : null;
 }
 
-function runWordPressJson(config, wpRoot, phpCode) {
-  return runCommand(config.phpBinary || "php", ["-r", $trimPhp(phpCode)]).then((result) => {
+function runWordPressJson(config, wpRoot, phpCode, options = {}) {
+  return runCommand(config.phpBinary || "php", ["-r", $trimPhp(phpCode)], options).then((result) => {
     if (!result.ok) {
       return {
         ok: false,

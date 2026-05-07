@@ -78,6 +78,8 @@ activate both plugins
 deactivate all plugins
 activate all plugins
 reactivate all plugins
+install Classic Editor plugin and activate it
+add new plugin Query Monitor
 activate WP Debug Hub plugin
 change theme to Twenty Twenty-Four
 switch to Twenty Twenty-Five
@@ -85,7 +87,7 @@ enable debug log
 disable debug log
 ```
 
-Dashboard chat, terminal chat, and `npm start -- "..."` execute these plugin/theme/debug-log state changes immediately when the request is clear. Button controls still show browser confirmation, and direct CLI commands still require `--yes`.
+Dashboard chat, terminal chat, and `npm start -- "..."` execute these plugin/theme/debug-log state changes immediately when the request is clear. Plugin installs resolve by WordPress.org plugin name or slug, install through WordPress' upgrader, and activate after install. Button controls still show browser confirmation, and direct CLI commands still require `--yes`.
 
 For client support questions, the agent checks the installed plugin list, identifies the plugin the client is asking about, verifies that plugin first, then searches other installed plugins for a workaround. For example, if a client asks about scheduled support emails in a ticketing plugin, it can explain whether that plugin has the feature and whether FluentCRM can handle scheduled email campaigns or automations instead.
 
