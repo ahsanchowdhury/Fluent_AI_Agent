@@ -130,3 +130,19 @@ npm run index:code -- . --yes
 The indexer creates an OpenAI vector store, uploads supported code files, saves the vector store ID in `memory/vector-store-id.txt`, and updates `.env` with `OPENAI_VECTOR_STORE_ID`.
 
 Generated memory files are ignored by Git.
+
+## Debug Workflow
+
+Run the full read-only debugging workflow against the homepage:
+
+```bash
+npm run debug
+```
+
+Run it against a relative path:
+
+```bash
+npm run debug -- support-portal
+```
+
+The workflow collects browser diagnostics, the latest WordPress debug log lines, WP-CLI plugin status, and local plugin discovery, then asks the model for a practical diagnosis. Diagnostic JSON is saved under `memory/diagnostics` and ignored by Git.
