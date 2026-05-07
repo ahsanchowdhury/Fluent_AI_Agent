@@ -7,7 +7,13 @@ import { collectDebugContext, analyzeDebugContext, saveDebugContext } from "../s
 import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listPluginDirectories } from "../src/tools/filesystem.js";
-import { activateTheme, changePluginStatus, getWordPressSiteSummary, listThemes } from "../src/tools/wordpress.js";
+import {
+  activateTheme,
+  changeAllPluginsStatus,
+  changePluginStatus,
+  getWordPressSiteSummary,
+  listThemes,
+} from "../src/tools/wordpress.js";
 
 loadEnv();
 const config = getConfig();
@@ -189,6 +195,15 @@ app.listen(port, "127.0.0.1", () => {
 
 async function detectWordPressAction(message) {
   const normalized = normalize(message);
+  const allPluginsAction = normalized.match(/\b(deactivate|disable)\b\s+(all|every)\s+plugins?\b/);
+
+  if (allPluginsAction) {
+    return {
+      type: "all_plugins",
+      action: "deactivate",
+    };
+  }
+
   const pluginAction = normalized.match(/\b(activate|deactivate)\b\s+(.+)/);
 
   if (pluginAction && !normalized.includes("theme")) {
@@ -273,6 +288,10 @@ async function executeWordPressAction(action) {
     return changePluginStatus(config, action.pluginFile, action.action);
   }
 
+  if (action.type === "all_plugins") {
+    return changeAllPluginsStatus(config, action.action);
+  }
+
   if (action.type === "theme") {
     return activateTheme(config, action.stylesheet);
   }
@@ -291,6 +310,11 @@ function formatActionResult(result) {
 
   if (result.plugin) {
     return `Done. ${result.plugin} is now ${result.active ? "active" : "inactive"}.`;
+  }
+
+  if (result.action === "deactivate_all_plugins") {
+    const names = result.plugins?.length ? `\n\nDeactivated:\n${result.plugins.map((plugin) => `- ${plugin}`).join("\n")}` : "";
+    return `Done. Deactivated ${result.count} active plugin${result.count === 1 ? "" : "s"}. Active plugins now: ${result.active_after}.${names}`;
   }
 
   if (result.theme) {

@@ -222,6 +222,34 @@ export function changePluginStatus(config, pluginFile, action) {
   return runWordPressJson(config, wpRoot, phpCode);
 }
 
+export function changeAllPluginsStatus(config, action) {
+  if (action !== "deactivate") {
+    return Promise.resolve({ ok: false, message: `Unsupported all-plugins action: ${action}` });
+  }
+
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    if (!function_exists('deactivate_plugins')) {
+      require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+    $active_plugins = (array) get_option('active_plugins', array());
+    if (!empty($active_plugins)) {
+      deactivate_plugins($active_plugins);
+    }
+    $active_after = (array) get_option('active_plugins', array());
+    echo wp_json_encode(array(
+      'ok' => true,
+      'action' => 'deactivate_all_plugins',
+      'count' => count($active_plugins),
+      'plugins' => array_values($active_plugins),
+      'active_after' => count($active_after),
+    ));
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode);
+}
+
 export function activateTheme(config, stylesheet) {
   const wpRoot = getWordPressRoot(config.pluginRoot);
   const phpCode = `
