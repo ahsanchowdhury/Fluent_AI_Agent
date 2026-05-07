@@ -23,6 +23,7 @@ const port = Number(process.env.AGENT_WEB_PORT || 3333);
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(dirname, "..", "web");
 const conversations = new Map();
+const conversationActionContext = new Map();
 
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(publicDir));
@@ -112,6 +113,7 @@ app.post("/api/theme-action", async (request, response) => {
 app.post("/api/chat", async (request, response) => {
   const message = String(request.body?.message || "").trim();
   const conversationId = String(request.body?.conversationId || "default");
+  const history = Array.isArray(request.body?.history) ? request.body.history : [];
 
   if (!message) {
     response.status(400).json({ error: "Message is required." });
@@ -119,9 +121,10 @@ app.post("/api/chat", async (request, response) => {
   }
 
   try {
-    const wordpressAction = await detectWordPressAction(message);
+    const wordpressAction = await detectWordPressAction(message, conversationId, history);
     if (wordpressAction) {
       const result = await executeWordPressAction(wordpressAction);
+      rememberWordPressAction(conversationId, wordpressAction, result);
       response.json({ text: formatActionResult(result) });
       return;
     }
@@ -146,6 +149,7 @@ app.post("/api/chat", async (request, response) => {
 app.post("/api/reset", (request, response) => {
   const conversationId = String(request.body?.conversationId || "default");
   conversations.delete(conversationId);
+  conversationActionContext.delete(conversationId);
   response.json({ ok: true });
 });
 
@@ -193,7 +197,7 @@ app.listen(port, "127.0.0.1", () => {
   console.log(`Local WP AI Agent dashboard: http://127.0.0.1:${port}`);
 });
 
-async function detectWordPressAction(message) {
+async function detectWordPressAction(message, conversationId, history = []) {
   const normalized = normalize(message);
   const allPluginsAction = normalized.match(/\b(deactivate|disable)\b\s+(all|every)\s+plugins?\b/);
 
@@ -205,10 +209,12 @@ async function detectWordPressAction(message) {
   }
 
   const pluginAction = normalized.match(/\b(activate|deactivate)\b\s+(.+)/);
+  const followUpPluginAction = detectPluginFollowUp(normalized, conversationId, history);
 
-  if (pluginAction && !normalized.includes("theme")) {
-    const action = pluginAction[1];
-    const target = pluginAction[2]
+  if ((pluginAction && !normalized.includes("theme")) || followUpPluginAction) {
+    const action = followUpPluginAction?.action || pluginAction[1];
+    const rawTarget = followUpPluginAction?.target || pluginAction[2];
+    const target = rawTarget
       ?.replace(/\b(plugin|extension|please|the)\b/g, " ")
       .replace(/\s+/g, " ")
       .trim() || "";
@@ -279,6 +285,58 @@ async function detectWordPressAction(message) {
   return null;
 }
 
+function detectPluginFollowUp(normalized, conversationId, history) {
+  if (normalized.includes("theme")) {
+    return null;
+  }
+
+  const previousAction = getPreviousPluginAction(conversationId, history);
+  if (!previousAction) {
+    return null;
+  }
+
+  const followUp =
+    normalized.match(/\b(?:same|do same|do the same|also|again)\s+(?:for|to|on)\s+(.+)/) ||
+    normalized.match(/\b(?:same|do same|do the same|also|again)\s+(.+)/) ||
+    normalized.match(/\b(?:for|to|on)\s+(.+)/);
+  if (!followUp) {
+    return null;
+  }
+
+  const target = followUp[1]
+    ?.replace(/\b(as well|too|also|same|do|the)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!target) {
+    return null;
+  }
+
+  return {
+    action: previousAction,
+    target,
+  };
+}
+
+function getPreviousPluginAction(conversationId, history) {
+  const remembered = conversationActionContext.get(conversationId);
+  if (remembered?.type === "plugin" && remembered.action) {
+    return remembered.action;
+  }
+
+  for (const item of [...history].reverse()) {
+    if (item?.role !== "user") {
+      continue;
+    }
+
+    const match = normalize(item.text).match(/\b(activate|deactivate)\b\s+(.+)/);
+    if (match && !normalize(item.text).includes("theme")) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
+
 async function executeWordPressAction(action) {
   if (action.type === "noop") {
     return { ok: true, message: action.message };
@@ -324,16 +382,52 @@ function formatActionResult(result) {
   return "Done.";
 }
 
+function rememberWordPressAction(conversationId, action, result) {
+  if (!result.ok || action.type === "noop") {
+    return;
+  }
+
+  if (action.type === "plugin") {
+    conversationActionContext.set(conversationId, {
+      type: "plugin",
+      action: action.action,
+      pluginFile: action.pluginFile,
+      pluginName: action.pluginName,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
+  if (action.type === "theme") {
+    conversationActionContext.set(conversationId, {
+      type: "theme",
+      action: "activate",
+      stylesheet: action.stylesheet,
+      themeName: action.themeName,
+      updatedAt: Date.now(),
+    });
+  }
+}
+
 function findPlugin(plugins, target) {
   if (!target) {
     return null;
   }
 
   const normalizedTarget = normalize(target);
-  return plugins.find((plugin) => {
-    const values = [plugin.name, plugin.file, plugin.file.split("/")[0]].map(normalize);
-    return values.some((value) => value === normalizedTarget || value.includes(normalizedTarget) || normalizedTarget.includes(value));
-  });
+  const candidates = plugins
+    .map((plugin) => ({
+      plugin,
+      values: [plugin.name, plugin.file, plugin.file.split("/")[0]].map(normalize),
+    }))
+    .filter((candidate) =>
+      candidate.values.some(
+        (value) => value === normalizedTarget || value.includes(normalizedTarget) || normalizedTarget.includes(value)
+      )
+    );
+
+  candidates.sort((a, b) => pluginMatchScore(b.values, normalizedTarget) - pluginMatchScore(a.values, normalizedTarget));
+  return candidates[0]?.plugin || null;
 }
 
 function findTheme(themes, target) {
@@ -355,4 +449,21 @@ function normalize(value) {
     .replace(/[^a-z0-9/]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function pluginMatchScore(values, normalizedTarget) {
+  const scores = values.map((value) => {
+    if (value === normalizedTarget) {
+      return 10000 + value.length;
+    }
+    if (value.includes(normalizedTarget)) {
+      return 5000 + normalizedTarget.length;
+    }
+    if (normalizedTarget.includes(value)) {
+      return 1000 + value.length;
+    }
+    return 0;
+  });
+
+  return Math.max(...scores);
 }

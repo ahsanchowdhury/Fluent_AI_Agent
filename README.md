@@ -65,12 +65,15 @@ http://127.0.0.1:3333
 
 The dashboard is bound to `127.0.0.1` for local use. It supports chat, debug, index status/sync, plugin listing, and chat reset.
 
+Previous dashboard chats are saved in your browser and shown in the Conversations list.
+
 It also includes confirmed controls for activating/deactivating plugins and activating themes.
 
 You can also use chat for direct actions:
 
 ```txt
 deactivate Bit File Manager plugin
+same for Fluent Support Pro
 deactivate all plugins
 activate WP Debug Hub plugin
 activate Twenty Twenty-Four theme

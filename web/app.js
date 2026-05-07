@@ -1,10 +1,13 @@
-const conversationId = crypto.randomUUID();
+const storageKey = "localWpAgentConversations";
+let conversations = loadConversations();
+let activeConversationId = getInitialConversationId();
 const messages = document.querySelector("#messages");
 const form = document.querySelector("#chatForm");
 const input = document.querySelector("#messageInput");
 const statusList = document.querySelector("#statusList");
 const pluginsList = document.querySelector("#pluginsList");
 const themesList = document.querySelector("#themesList");
+const conversationList = document.querySelector("#conversationList");
 const siteLabel = document.querySelector("#siteLabel");
 const syncBadge = document.querySelector("#syncBadge");
 const sendButton = document.querySelector("#sendButton");
@@ -24,12 +27,18 @@ form.addEventListener("submit", async (event) => {
   input.value = "";
   resizeInput();
   addMessage("user", text);
+  updateConversationTitle(text);
   setBusy(true);
   const pending = addThinkingMessage();
 
   try {
-    const result = await postJson("/api/chat", { conversationId, message: text });
+    const result = await postJson("/api/chat", {
+      conversationId: activeConversationId,
+      message: text,
+      history: getActiveConversation().messages.slice(-12),
+    });
     setMessageText(pending, result.text || "(No response)");
+    await loadStatus();
   } catch (error) {
     setMessageText(pending, `Error: ${error.message}`);
     pending.querySelector(".message").classList.add("system");
@@ -47,7 +56,8 @@ input.addEventListener("keydown", (event) => {
 });
 
 await loadStatus();
-addMessage("assistant", "Ready. Ask me about your local WordPress plugins, debug logs, browser errors, or code memory.");
+renderConversations();
+renderActiveConversation();
 
 async function loadStatus() {
   const status = await fetchJson("/api/status");
@@ -109,9 +119,10 @@ async function syncIndex() {
 }
 
 async function resetChat() {
-  await postJson("/api/reset", { conversationId });
-  messages.innerHTML = "";
-  addMessage("assistant", "Chat reset.");
+  activeConversationId = createConversation("New chat");
+  saveConversations();
+  renderConversations();
+  renderActiveConversation();
 }
 
 async function loadThemes() {
@@ -214,19 +225,34 @@ function addStatus(label, value) {
 }
 
 function addMessage(role, text) {
+  const messageData = {
+    id: crypto.randomUUID(),
+    role,
+    text,
+    createdAt: new Date().toISOString(),
+  };
+  getActiveConversation().messages.push(messageData);
+  getActiveConversation().updatedAt = messageData.createdAt;
+  saveConversations();
+  renderConversations();
+  return appendMessage(messageData);
+}
+
+function appendMessage(messageData) {
   const row = document.createElement("div");
-  row.className = `message-row ${role}`;
+  row.className = `message-row ${messageData.role}`;
+  row.dataset.messageId = messageData.id;
   const avatar = document.createElement("div");
   avatar.className = "avatar";
-  avatar.textContent = role === "user" ? "YOU" : role === "system" ? "SYS" : "AI";
+  avatar.textContent = messageData.role === "user" ? "YOU" : messageData.role === "system" ? "SYS" : "AI";
   const message = document.createElement("div");
-  message.className = `message ${role}`;
+  message.className = `message ${messageData.role}`;
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.textContent = `${role === "user" ? "You" : role === "system" ? "System" : "Agent"} · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  meta.textContent = `${messageData.role === "user" ? "You" : messageData.role === "system" ? "System" : "Agent"} · ${formatTime(messageData.createdAt)}`;
   const body = document.createElement("div");
   body.className = "body";
-  body.textContent = text;
+  body.textContent = messageData.text;
   message.append(meta, body);
   row.append(avatar, message);
   messages.append(row);
@@ -242,6 +268,16 @@ function addThinkingMessage(label = "Thinking") {
 
 function setMessageText(row, text) {
   row.querySelector(".body").textContent = text;
+  const messageId = row.dataset.messageId;
+  const conversation = getActiveConversation();
+  const storedMessage = conversation.messages.find((message) => message.id === messageId);
+  if (storedMessage) {
+    storedMessage.text = text;
+    storedMessage.updatedAt = new Date().toISOString();
+    conversation.updatedAt = storedMessage.updatedAt;
+    saveConversations();
+    renderConversations();
+  }
   messages.scrollTop = messages.scrollHeight;
 }
 
@@ -279,4 +315,117 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function loadConversations() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "[]");
+    if (Array.isArray(saved) && saved.length) {
+      return saved.filter((conversation) => conversation?.id && Array.isArray(conversation.messages));
+    }
+  } catch (_error) {
+    localStorage.removeItem(storageKey);
+  }
+
+  return [buildConversation("New chat")];
+}
+
+function saveConversations() {
+  localStorage.setItem(storageKey, JSON.stringify(conversations.slice(0, 30)));
+}
+
+function getInitialConversationId() {
+  return conversations[0]?.id || createConversation("New chat");
+}
+
+function createConversation(title) {
+  const conversation = buildConversation(title);
+  conversations.unshift(conversation);
+  return conversation.id;
+}
+
+function buildConversation(title) {
+  const now = new Date().toISOString();
+  return {
+    id: crypto.randomUUID(),
+    title,
+    createdAt: now,
+    updatedAt: now,
+    messages: [
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        text: "Ready. Ask me about your local WordPress plugins, debug logs, browser errors, or code memory.",
+        createdAt: now,
+      },
+    ],
+  };
+}
+
+function getActiveConversation() {
+  let conversation = conversations.find((item) => item.id === activeConversationId);
+  if (!conversation) {
+    activeConversationId = createConversation("New chat");
+    conversation = conversations[0];
+  }
+  return conversation;
+}
+
+function updateConversationTitle(text) {
+  const conversation = getActiveConversation();
+  if (conversation.title !== "New chat" || !text) {
+    return;
+  }
+
+  conversation.title = text.length > 42 ? `${text.slice(0, 39)}...` : text;
+  saveConversations();
+  renderConversations();
+}
+
+function renderActiveConversation() {
+  messages.innerHTML = "";
+  for (const message of getActiveConversation().messages) {
+    appendMessage(message);
+  }
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function renderConversations() {
+  conversationList.innerHTML = "";
+  const sorted = [...conversations].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  for (const conversation of sorted) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.className = `conversation-button ${conversation.id === activeConversationId ? "active" : ""}`;
+    button.type = "button";
+    button.addEventListener("click", () => {
+      activeConversationId = conversation.id;
+      renderConversations();
+      renderActiveConversation();
+    });
+
+    const title = document.createElement("span");
+    title.className = "conversation-title";
+    title.textContent = conversation.title || "New chat";
+    const meta = document.createElement("span");
+    meta.className = "conversation-meta";
+    meta.textContent = `${conversation.messages.length} messages · ${formatRelative(conversation.updatedAt)}`;
+    button.append(title, meta);
+    item.append(button);
+    conversationList.append(item);
+  }
+}
+
+function formatTime(value) {
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatRelative(value) {
+  const diff = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(0, Math.round(diff / 60000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
