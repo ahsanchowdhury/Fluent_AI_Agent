@@ -1,5 +1,6 @@
 import readline from "readline";
 import { stdin as input, stdout as output } from "process";
+import { maybeAutoIndex } from "../src/autoIndex.js";
 import { collectDebugContext, analyzeDebugContext, saveDebugContext } from "../src/debugWorkflow.js";
 import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
@@ -17,6 +18,11 @@ let previousResponseId = null;
 const isInteractive = Boolean(input.isTTY);
 
 printHeader();
+if (config.autoIndexOnChat) {
+  console.log("Checking dynamic code memory before chat...");
+  const result = await maybeAutoIndex(config, "chat");
+  console.log(result.message);
+}
 if (isInteractive) {
   rl.prompt();
 }

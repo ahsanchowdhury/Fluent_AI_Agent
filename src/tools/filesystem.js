@@ -15,6 +15,8 @@ const DEFAULT_IGNORE_DIRS = new Set([
   "coverage",
   "memory",
   "_local-ai-agent",
+  "admin-app",
+  "libs",
 ]);
 
 const TEXT_EXTENSIONS = new Set([
@@ -44,6 +46,8 @@ function isIgnoredFile(fileName) {
     fileName.endsWith(".min.js") ||
     fileName.endsWith(".min.css") ||
     fileName.endsWith(".map") ||
+    /-[a-f0-9]{8,}\.(js|css)$/i.test(fileName) ||
+    /^main\.\d+(\.\d+)+\.(js|css)$/i.test(fileName) ||
     fileName === "composer.lock" ||
     fileName === "package-lock.json" ||
     fileName === "yarn.lock" ||

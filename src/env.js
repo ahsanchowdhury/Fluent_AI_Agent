@@ -53,6 +53,8 @@ export function getConfig() {
     openaiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
     openaiVectorStoreId: process.env.OPENAI_VECTOR_STORE_ID || "",
     indexMaxFiles: Number(process.env.INDEX_MAX_FILES || 300),
+    autoIndexOnChat: process.env.AUTO_INDEX_ON_CHAT === "true",
+    autoIndexOnDebug: process.env.AUTO_INDEX_ON_DEBUG === "true",
   };
 }
 

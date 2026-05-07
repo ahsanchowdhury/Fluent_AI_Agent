@@ -15,6 +15,8 @@
     "wp:plugins": "node scripts/wp-plugins.js",
     "browser:debug": "node scripts/browser-debug.js",
     "index:code": "node scripts/index-code.js",
+    "index:sync": "node scripts/index-sync.js",
+    "index:status": "node scripts/index-status.js",
     "debug": "node scripts/debug.js",
     "chat": "node scripts/chat.js",
     "patch:propose": "node scripts/patch-propose.js",

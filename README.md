@@ -131,6 +131,25 @@ The indexer creates an OpenAI vector store, uploads supported code files, saves 
 
 Generated memory files are ignored by Git.
 
+Dynamic sync for all installed plugins:
+
+```bash
+npm run index:status
+npm run index:sync
+npm run index:sync -- --yes
+```
+
+`index:sync` scans the current installed plugin folders, compares file hashes with `memory/index-manifest.json`, and creates a fresh vector store only when files were added, changed, or removed. This keeps memory dynamic when you install or update plugins.
+
+Optional automatic sync:
+
+```env
+AUTO_INDEX_ON_CHAT=true
+AUTO_INDEX_ON_DEBUG=true
+```
+
+When enabled, chat/debug checks whether installed plugin code changed and refreshes memory before starting.
+
 ## Debug Workflow
 
 Run the full read-only debugging workflow against the homepage:

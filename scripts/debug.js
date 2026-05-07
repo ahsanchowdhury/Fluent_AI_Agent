@@ -1,4 +1,5 @@
 import { analyzeDebugContext, collectDebugContext, saveDebugContext } from "../src/debugWorkflow.js";
+import { maybeAutoIndex } from "../src/autoIndex.js";
 import { getConfig, loadEnv } from "../src/env.js";
 import { createOpenAIClient } from "../src/openaiClient.js";
 
@@ -9,6 +10,12 @@ const targetPath = args.find((arg) => !arg.startsWith("--")) || "";
 const userRequest = args.length
   ? `Debug local WordPress target: ${targetPath || "/"}`
   : "Debug the configured local WordPress homepage.";
+
+if (config.autoIndexOnDebug) {
+  console.log("Checking dynamic code memory before debug...");
+  const result = await maybeAutoIndex(config, "debug");
+  console.log(result.message);
+}
 
 console.log("Collecting diagnostics...");
 const context = await collectDebugContext(config, {
