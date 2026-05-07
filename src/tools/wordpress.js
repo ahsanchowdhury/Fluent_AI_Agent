@@ -396,8 +396,11 @@ export async function installWordPressOrgPlugin(config, query, options = {}) {
       $activate_result = activate_plugin($plugin_file);
       ob_end_clean();
       if (is_wp_error($activate_result)) {
-        echo wp_json_encode(array('ok' => false, 'message' => $activate_result->get_error_message(), 'plugin' => $plugin_file));
-        exit;
+        $active = is_plugin_active($plugin_file);
+        if (!$active) {
+          echo wp_json_encode(array('ok' => false, 'message' => $activate_result->get_error_message(), 'plugin' => $plugin_file));
+          exit;
+        }
       }
       $active = is_plugin_active($plugin_file);
     }
@@ -499,9 +502,15 @@ async function installWordPressOrgPluginFromZip(config, query, options) {
   if (options.activate !== false) {
     const activation = await changePluginStatus(config, pluginFile, "activate");
     if (!activation.ok) {
-      return activation;
+      const summary = await getWordPressSiteSummary(config);
+      const maybeActive = summary.ok ? summary.summary.plugins.items.some((plugin) => plugin.file === pluginFile && plugin.active) : false;
+      if (!maybeActive) {
+        return activation;
+      }
+      active = true;
+    } else {
+      active = activation.active;
     }
-    active = activation.active;
   } else {
     const summary = await getWordPressSiteSummary(config);
     active = summary.ok ? summary.summary.plugins.items.some((plugin) => plugin.file === pluginFile && plugin.active) : false;

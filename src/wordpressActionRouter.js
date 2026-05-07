@@ -303,15 +303,17 @@ function detectInstallPluginAction(normalized) {
   }
 
   const installMatch =
-    normalized.match(/\binstall\s+(.+?)\s+plugin\b/) ||
+    normalized.match(/\b(?:install|intall|insall)\s+(.+?)\s+(?:plugin|from\s+(?:the\s+)?plugin\s+directory|from\s+(?:the\s+)?plugins\s+directory)\b/) ||
     normalized.match(/\badd\s+new\s+(.+?)\s+plugin\b/) ||
-    normalized.match(/\b(?:install|add)\s+(?:new\s+)?plugin\s+(.+)/);
+    normalized.match(/\b(?:install|intall|insall|add)\s+(?:new\s+)?plugin\s+(.+)/) ||
+    normalized.match(/\b(?:install|intall|insall)\s+(.+)/);
   if (!installMatch) {
     return null;
   }
 
   const query = installMatch[1]
     .replace(/\b(and|then|also)?\s*(activate|enable|reactivate)\s*(it|plugin)?\b/g, " ")
+    .replace(/\bfrom\s+(?:the\s+)?plugins?\s+directory\b/g, " ")
     .replace(/\s+plugin\s*$/g, " ")
     .replace(/\s+/g, " ")
     .trim();
