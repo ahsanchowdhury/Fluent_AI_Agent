@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { execFile } from "child_process";
 import { normalizeInsideRoot } from "./filesystem.js";
@@ -173,7 +174,7 @@ export function getWordPressSiteSummary(config) {
       return {
         ok: true,
         wordpressRoot: wpRoot,
-        summary: JSON.parse(result.output),
+        summary: parseJsonFromOutput(result.output),
       };
     } catch (error) {
       return {
@@ -275,10 +276,10 @@ export function changeAllPluginsStatus(config, action) {
   return runWordPressJson(config, wpRoot, phpCode);
 }
 
-export function installWordPressOrgPlugin(config, query, options = {}) {
+export async function installWordPressOrgPlugin(config, query, options = {}) {
   const pluginQuery = String(query || "").trim();
   if (!pluginQuery) {
-    return Promise.resolve({ ok: false, message: "Plugin name or slug is required." });
+    return { ok: false, message: "Plugin name or slug is required." };
   }
 
   const activate = options.activate !== false;
@@ -432,7 +433,199 @@ export function installWordPressOrgPlugin(config, query, options = {}) {
     }
   `;
 
-  return runWordPressJson(config, wpRoot, phpCode, { timeout: 120000 });
+  const result = await runWordPressJson(config, wpRoot, phpCode, { timeout: 120000 });
+  if (result.ok || result.message !== "Plugin install failed.") {
+    return result;
+  }
+
+  return installWordPressOrgPluginFromZip(config, pluginQuery, { activate, wpRoot });
+}
+
+async function installWordPressOrgPluginFromZip(config, query, options) {
+  const wpRoot = options.wpRoot || getWordPressRoot(config.pluginRoot);
+  const info = await resolveWordPressOrgPlugin(query);
+  if (!info.ok) {
+    return info;
+  }
+
+  const pluginFileBefore = await findInstalledPluginFile(config, info.slug);
+  if (!pluginFileBefore.ok) {
+    return pluginFileBefore;
+  }
+
+  let pluginFile = pluginFileBefore.plugin;
+  let alreadyInstalled = Boolean(pluginFile);
+
+  if (!alreadyInstalled) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "fluent-ai-plugin-"));
+    const zipPath = path.join(tempDir, `${info.slug}.zip`);
+
+    try {
+      const download = await fetch(info.downloadLink);
+      if (!download.ok) {
+        return {
+          ok: false,
+          message: `Plugin download failed (${download.status}): ${info.downloadLink}`,
+        };
+      }
+
+      fs.writeFileSync(zipPath, Buffer.from(await download.arrayBuffer()));
+      const unzip = await runCommand("unzip", ["-q", "-o", zipPath, "-d", config.pluginRoot], { timeout: 120000 });
+      if (!unzip.ok) {
+        return {
+          ok: false,
+          message: `Plugin unzip failed: ${unzip.output}`,
+        };
+      }
+    } finally {
+      fs.rmSync(tempDir, { force: true, recursive: true });
+    }
+
+    const pluginFileAfter = await findInstalledPluginFile(config, info.slug);
+    if (!pluginFileAfter.ok) {
+      return pluginFileAfter;
+    }
+    pluginFile = pluginFileAfter.plugin;
+  }
+
+  if (!pluginFile) {
+    return {
+      ok: false,
+      message: `Plugin installed but main file could not be detected for: ${info.slug}`,
+    };
+  }
+
+  let active = false;
+  if (options.activate !== false) {
+    const activation = await changePluginStatus(config, pluginFile, "activate");
+    if (!activation.ok) {
+      return activation;
+    }
+    active = activation.active;
+  } else {
+    const summary = await getWordPressSiteSummary(config);
+    active = summary.ok ? summary.summary.plugins.items.some((plugin) => plugin.file === pluginFile && plugin.active) : false;
+  }
+
+  return {
+    ok: true,
+    action: "install_plugin",
+    query,
+    slug: info.slug,
+    name: info.name,
+    version: info.version,
+    plugin: pluginFile,
+    installed: true,
+    already_installed: alreadyInstalled,
+    activated: options.activate !== false,
+    active,
+    installer: "zip_fallback",
+    wordpressRoot: wpRoot,
+  };
+}
+
+async function resolveWordPressOrgPlugin(query) {
+  const slug = slugify(query);
+  const exact = await fetchWordPressPluginInfo(slug);
+  if (exact.ok) {
+    return exact;
+  }
+
+  const searchUrl = new URL("https://api.wordpress.org/plugins/info/1.2/");
+  searchUrl.searchParams.set("action", "query_plugins");
+  searchUrl.searchParams.set("request[search]", query);
+  searchUrl.searchParams.set("request[per_page]", "5");
+  searchUrl.searchParams.set("request[fields][sections]", "0");
+  searchUrl.searchParams.set("request[fields][description]", "0");
+
+  const response = await fetch(searchUrl);
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: `WordPress.org plugin search failed (${response.status}).`,
+    };
+  }
+
+  const data = await response.json();
+  const plugins = Array.isArray(data.plugins) ? data.plugins : [];
+  if (!plugins.length) {
+    return {
+      ok: false,
+      message: `No WordPress.org plugin matched: ${query}`,
+    };
+  }
+
+  const normalizedQuery = normalizeLookup(query);
+  const selected =
+    plugins.find((plugin) => normalizeLookup(plugin.slug) === normalizeLookup(slug)) ||
+    plugins.find((plugin) => normalizeLookup(plugin.name) === normalizedQuery) ||
+    plugins[0];
+
+  return {
+    ok: true,
+    slug: selected.slug,
+    name: selected.name || selected.slug,
+    version: selected.version || "",
+    downloadLink: selected.download_link,
+  };
+}
+
+async function fetchWordPressPluginInfo(slug) {
+  const url = new URL("https://api.wordpress.org/plugins/info/1.2/");
+  url.searchParams.set("action", "plugin_information");
+  url.searchParams.set("request[slug]", slug);
+  url.searchParams.set("request[fields][sections]", "0");
+  url.searchParams.set("request[fields][description]", "0");
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    return {
+      ok: false,
+      message: `WordPress.org plugin lookup failed (${response.status}).`,
+    };
+  }
+
+  const data = await response.json();
+  if (!data || data.error) {
+    return {
+      ok: false,
+      message: data?.error || `No WordPress.org plugin matched slug: ${slug}`,
+    };
+  }
+
+  return {
+    ok: true,
+    slug: data.slug,
+    name: data.name || data.slug,
+    version: data.version || "",
+    downloadLink: data.download_link,
+  };
+}
+
+async function findInstalledPluginFile(config, slug) {
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    $slug = ${JSON.stringify(slug)};
+    $plugins = get_plugins();
+    $plugin_file = '';
+    foreach ($plugins as $file => $plugin) {
+      $folder = dirname($file);
+      if ($folder === $slug) {
+        if (!$plugin_file) {
+          $plugin_file = $file;
+        }
+        if (basename($file, '.php') === $slug) {
+          $plugin_file = $file;
+          break;
+        }
+      }
+    }
+    echo wp_json_encode(array('ok' => true, 'plugin' => $plugin_file));
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode);
 }
 
 export function updateWordPressDebugLog(config, enabled) {
@@ -529,6 +722,8 @@ function runCommand(command, args, options = {}) {
 
         resolve({
           ok: !error,
+          stdout,
+          stderr,
           output: output || (error ? error.message : ""),
         });
       }
@@ -561,6 +756,21 @@ function readWpConfigBoolean(content, name) {
   return match ? match[1].toLowerCase() === "true" : null;
 }
 
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeLookup(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function runWordPressJson(config, wpRoot, phpCode, options = {}) {
   return runCommand(config.phpBinary || "php", ["-r", $trimPhp(phpCode)], options).then((result) => {
     if (!result.ok) {
@@ -574,7 +784,7 @@ function runWordPressJson(config, wpRoot, phpCode, options = {}) {
     try {
       return {
         wordpressRoot: wpRoot,
-        ...JSON.parse(result.output),
+        ...parseJsonFromOutput(result.output),
       };
     } catch (error) {
       return {
@@ -584,4 +794,19 @@ function runWordPressJson(config, wpRoot, phpCode, options = {}) {
       };
     }
   });
+}
+
+function parseJsonFromOutput(output) {
+  try {
+    return JSON.parse(output);
+  } catch (_error) {
+    const text = String(output || "");
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first === -1 || last === -1 || last <= first) {
+      throw _error;
+    }
+
+    return JSON.parse(text.slice(first, last + 1));
+  }
 }
