@@ -15,7 +15,8 @@
     "wp:plugins": "node scripts/wp-plugins.js",
     "browser:debug": "node scripts/browser-debug.js",
     "index:code": "node scripts/index-code.js",
-    "debug": "node scripts/debug.js"
+    "debug": "node scripts/debug.js",
+    "chat": "node scripts/chat.js"
   },
   "dependencies": {
     "openai": "^6.36.0",

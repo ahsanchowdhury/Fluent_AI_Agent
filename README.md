@@ -146,3 +146,22 @@ npm run debug -- support-portal
 ```
 
 The workflow collects browser diagnostics, the latest WordPress debug log lines, WP-CLI plugin status, and local plugin discovery, then asks the model for a practical diagnosis. Diagnostic JSON is saved under `memory/diagnostics` and ignored by Git.
+
+## Interactive Chat
+
+Start an interactive terminal session:
+
+```bash
+npm run chat
+```
+
+Useful chat commands:
+
+```txt
+/plugins
+/files my-shop
+/read my-shop/my-shop-loyalty.php
+/debug wp-admin
+/reset
+/exit
+```

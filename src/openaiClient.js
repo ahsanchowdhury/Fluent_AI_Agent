@@ -12,8 +12,13 @@ export function createOpenAIClient(config) {
 }
 
 export async function askModel(client, { input, config }) {
+  const result = await createAgentResponse(client, { input, config });
+  return result.text;
+}
+
+export async function createAgentResponse(client, { input, config, previousResponseId = null }) {
   const tools = buildTools(config);
-  let response = await client.responses.create({
+  const request = {
     model: config.openaiModel,
     instructions: [
       "You are a local WordPress plugin debugging assistant.",
@@ -33,7 +38,13 @@ export async function askModel(client, { input, config }) {
     ].join("\n"),
     tools,
     input,
-  });
+  };
+
+  if (previousResponseId) {
+    request.previous_response_id = previousResponseId;
+  }
+
+  let response = await client.responses.create(request);
 
   for (let i = 0; i < 5; i += 1) {
     const toolCalls = response.output.filter((item) => item.type === "function_call");
@@ -63,7 +74,10 @@ export async function askModel(client, { input, config }) {
     });
   }
 
-  return response.output_text || "";
+  return {
+    text: response.output_text || "",
+    responseId: response.id,
+  };
 }
 
 function buildTools(config) {
