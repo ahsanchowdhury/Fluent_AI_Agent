@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Local AI agent for reading WordPress plugin code and debugging a XAMPP site.",
   "scripts": {
+    "ai": "node scripts/ai.js",
     "start": "node src/index.js",
     "doctor": "node scripts/doctor.js",
     "plugins": "node scripts/list-plugins.js",

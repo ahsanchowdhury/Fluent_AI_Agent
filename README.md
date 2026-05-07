@@ -39,6 +39,16 @@ Then run:
 npm run doctor
 ```
 
+## Daily Launcher
+
+Start the menu launcher:
+
+```bash
+npm run ai
+```
+
+The launcher gives you quick access to chat, debug, index status/sync, plugin listing, patch proposal, and doctor checks.
+
 ## Read-Only Code Tools
 
 List detected plugins:
