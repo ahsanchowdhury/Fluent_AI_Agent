@@ -5,6 +5,7 @@ import {
 } from "./tools/filesystem.js";
 import {
   lintPhpFile,
+  getWordPressSiteSummary,
   tailDebugLog,
   wpCliPluginList,
 } from "./tools/wordpress.js";
@@ -117,6 +118,19 @@ export const agentTools = [
   },
   {
     type: "function",
+    name: "get_wordpress_site_summary",
+    description:
+      "Read WordPress site facts through local XAMPP PHP: active theme, installed and active plugins, published/draft posts and pages, users, and WordPress version.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "debug_browser_page",
     description:
       "Visit the configured local WordPress site or a relative path with a headless browser and return page status, title, console errors, network failures, bad HTTP responses, body preview, and screenshot path.",
@@ -181,6 +195,10 @@ export async function runAgentTool(config, toolCall) {
 
     if (toolCall.name === "wp_cli_plugin_list") {
       return toolResult(true, await wpCliPluginList(config.pluginRoot));
+    }
+
+    if (toolCall.name === "get_wordpress_site_summary") {
+      return toolResult(true, await getWordPressSiteSummary(config));
     }
 
     if (toolCall.name === "debug_browser_page") {

@@ -122,6 +122,7 @@ npm start -- "List the readable files in my-shop."
 npm start -- "Check the latest WordPress debug log errors."
 npm start -- "Run PHP lint on my-shop/my-shop-loyalty.php."
 npm start -- "Visit my local site and summarize browser console or network errors."
+npm start -- "What theme is active and how many posts/pages are published?"
 ```
 
 Manual diagnostic commands:
@@ -130,6 +131,7 @@ Manual diagnostic commands:
 npm run debug:log -- 80
 npm run lint:php -- my-shop/my-shop-loyalty.php
 npm run wp:plugins
+npm run site:summary
 npm run browser:debug
 ```
 

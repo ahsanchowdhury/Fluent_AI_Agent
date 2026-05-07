@@ -27,7 +27,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       config.openaiVectorStoreId
         ? "You also have file_search memory over indexed plugin code. Use it for broad codebase questions before reading exact files."
         : "No vector store code memory is configured yet. Use local read-only tools instead.",
-      "You may also read the WordPress debug log, lint PHP files, check WP-CLI plugin status, and visit the local site with a headless browser.",
+      "You may also read WordPress site facts, the WordPress debug log, lint PHP files, check WP-CLI plugin status, and visit the local site with a headless browser.",
       "You cannot edit files, run arbitrary shell commands, or inspect the database yet.",
       "Use tools when the user's question requires local plugin names or file contents.",
       "When you use file contents, mention the relative file paths you inspected.",

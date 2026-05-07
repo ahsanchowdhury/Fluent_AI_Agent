@@ -97,6 +97,94 @@ export function wpCliPluginList(pluginRoot) {
   });
 }
 
+export function getWordPressSiteSummary(config) {
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+    if (!function_exists('get_plugins')) {
+      require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+    $theme = wp_get_theme();
+    $plugins = get_plugins();
+    $active_plugins = (array) get_option('active_plugins', array());
+    $active_lookup = array_fill_keys($active_plugins, true);
+    $plugin_rows = array();
+    foreach ($plugins as $file => $plugin) {
+      $plugin_rows[] = array(
+        'file' => $file,
+        'name' => $plugin['Name'] ?? $file,
+        'version' => $plugin['Version'] ?? '',
+        'active' => isset($active_lookup[$file]),
+      );
+    }
+    usort($plugin_rows, function($a, $b) {
+      return strcasecmp($a['name'], $b['name']);
+    });
+    $post_types = array('post', 'page');
+    $counts = array();
+    foreach ($post_types as $type) {
+      $count = wp_count_posts($type);
+      $counts[$type] = array(
+        'publish' => (int) ($count->publish ?? 0),
+        'draft' => (int) ($count->draft ?? 0),
+        'pending' => (int) ($count->pending ?? 0),
+        'private' => (int) ($count->private ?? 0),
+        'trash' => (int) ($count->trash ?? 0),
+      );
+    }
+    $users = count_users();
+    echo wp_json_encode(array(
+      'site' => array(
+        'name' => get_bloginfo('name'),
+        'url' => home_url('/'),
+        'admin_email' => get_bloginfo('admin_email'),
+        'wordpress_version' => get_bloginfo('version'),
+      ),
+      'theme' => array(
+        'name' => $theme->get('Name'),
+        'version' => $theme->get('Version'),
+        'stylesheet' => get_stylesheet(),
+        'template' => get_template(),
+      ),
+      'plugins' => array(
+        'total' => count($plugin_rows),
+        'active' => count($active_plugins),
+        'inactive' => max(0, count($plugin_rows) - count($active_plugins)),
+        'items' => $plugin_rows,
+      ),
+      'content' => $counts,
+      'users' => array(
+        'total' => (int) ($users['total_users'] ?? 0),
+        'roles' => $users['avail_roles'] ?? array(),
+      ),
+    ));
+  `;
+
+  return runCommand(config.phpBinary || "php", ["-r", $trimPhp(phpCode)]).then((result) => {
+    if (!result.ok) {
+      return {
+        ok: false,
+        wordpressRoot: wpRoot,
+        message: result.output,
+      };
+    }
+
+    try {
+      return {
+        ok: true,
+        wordpressRoot: wpRoot,
+        summary: JSON.parse(result.output),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        wordpressRoot: wpRoot,
+        message: `WordPress summary returned invalid JSON: ${error.message}\n${result.output}`,
+      };
+    }
+  });
+}
+
 function runCommand(command, args) {
   return new Promise((resolve) => {
     execFile(
@@ -116,4 +204,8 @@ function runCommand(command, args) {
       }
     );
   });
+}
+
+function $trimPhp(code) {
+  return code.replace(/^\s+|\s+$/g, "");
 }

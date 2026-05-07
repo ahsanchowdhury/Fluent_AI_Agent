@@ -60,6 +60,13 @@ async function main() {
   const php = await commandVersion("php", ["-v"]);
   line(php.ok ? "ok" : "warn", "PHP", php.ok ? php.message.split("\n")[0] : php.message);
 
+  const xamppPhp = await commandVersion(config.phpBinary, ["-v"]);
+  line(
+    xamppPhp.ok ? "ok" : "warn",
+    "Configured PHP_BINARY",
+    xamppPhp.ok ? `${config.phpBinary} (${xamppPhp.message.split("\n")[0]})` : xamppPhp.message
+  );
+
   const wp = await commandVersion("wp", ["--info"]);
   line(wp.ok ? "ok" : "warn", "WP-CLI", wp.ok ? "Available" : wp.message);
 

@@ -7,6 +7,7 @@ import { collectDebugContext, analyzeDebugContext, saveDebugContext } from "../s
 import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listPluginDirectories } from "../src/tools/filesystem.js";
+import { getWordPressSiteSummary } from "../src/tools/wordpress.js";
 
 loadEnv();
 const config = getConfig();
@@ -20,10 +21,11 @@ const conversations = new Map();
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(publicDir));
 
-app.get("/api/status", (_request, response) => {
+app.get("/api/status", async (_request, response) => {
   const current = buildIndexManifest(config, { path: "." });
   const previous = readSavedManifest();
   const diff = diffManifests(previous, current);
+  const siteSummary = await getWordPressSiteSummary(config);
 
   response.json({
     site: config.localSiteUrl,
@@ -43,7 +45,18 @@ app.get("/api/status", (_request, response) => {
       name: plugin.name,
       mainFiles: plugin.mainFiles.map((file) => file.replace(`${config.pluginRoot}/`, "")),
     })),
+    siteSummary: siteSummary.ok ? siteSummary.summary : null,
+    siteSummaryError: siteSummary.ok ? "" : siteSummary.message,
   });
+});
+
+app.get("/api/site-summary", async (_request, response) => {
+  const result = await getWordPressSiteSummary(config);
+  if (!result.ok) {
+    response.status(500).json({ error: result.message });
+    return;
+  }
+  response.json(result.summary);
 });
 
 app.post("/api/chat", async (request, response) => {

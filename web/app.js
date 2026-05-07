@@ -57,6 +57,13 @@ async function loadStatus() {
   addStatus("Index", status.index.inSync ? "in sync" : "needs sync");
   addStatus("Files", `${status.index.fileCount}`);
   addStatus("Key", status.key);
+
+  if (status.siteSummary) {
+    addStatus("Theme", status.siteSummary.theme.name);
+    addStatus("Plugins", `${status.siteSummary.plugins.active}/${status.siteSummary.plugins.total} active`);
+    addStatus("Posts", `${status.siteSummary.content.post.publish} published`);
+    addStatus("Pages", `${status.siteSummary.content.page.publish} published`);
+  }
   syncBadge.textContent = status.index.inSync ? "Memory in sync" : "Memory needs sync";
   syncBadge.className = `badge ${status.index.inSync ? "good" : "warn"}`;
 

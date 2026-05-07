@@ -14,6 +14,7 @@
     "debug:log": "node scripts/debug-log.js",
     "lint:php": "node scripts/lint-php.js",
     "wp:plugins": "node scripts/wp-plugins.js",
+    "site:summary": "node scripts/site-summary.js",
     "browser:debug": "node scripts/browser-debug.js",
     "index:code": "node scripts/index-code.js",
     "index:sync": "node scripts/index-sync.js",
