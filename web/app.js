@@ -1,4 +1,5 @@
 const storageKey = "localWpAgentConversations";
+const themeStorageKey = "localWpAgentTheme";
 let conversations = loadConversations();
 let activeConversationId = getInitialConversationId();
 const messages = document.querySelector("#messages");
@@ -14,7 +15,11 @@ const sendButton = document.querySelector("#sendButton");
 const imageInput = document.querySelector("#imageInput");
 const attachImageButton = document.querySelector("#attachImageButton");
 const imagePreviewList = document.querySelector("#imagePreviewList");
+const lightThemeButton = document.querySelector("#lightThemeButton");
+const darkThemeButton = document.querySelector("#darkThemeButton");
 let selectedImages = [];
+
+applyTheme(localStorage.getItem(themeStorageKey) || "light");
 
 document.querySelector("#debugHome").addEventListener("click", () => runDebug(""));
 document.querySelector("#debugPathButton").addEventListener("click", () => {
@@ -27,6 +32,8 @@ document.querySelector("#syncIndex").addEventListener("click", syncIndex);
 document.querySelector("#resetChat").addEventListener("click", resetChat);
 attachImageButton.addEventListener("click", () => imageInput.click());
 imageInput.addEventListener("change", handleImageSelection);
+lightThemeButton.addEventListener("click", () => applyTheme("light"));
+darkThemeButton.addEventListener("click", () => applyTheme("dark"));
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -406,34 +413,262 @@ function createImageStrip(images = []) {
 function renderMessageBody(element, text) {
   element.textContent = "";
   const value = String(text || "");
-  const urlPattern = /(https?:\/\/[^\s<>"']+)/g;
+  const blocks = parseMarkdownBlocks(value);
+
+  if (!blocks.length) {
+    return;
+  }
+
+  for (const block of blocks) {
+    element.append(renderMarkdownBlock(block));
+  }
+}
+
+function parseMarkdownBlocks(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const fence = line.match(/^```([A-Za-z0-9_-]+)?\s*$/);
+    if (fence) {
+      const code = [];
+      index += 1;
+      while (index < lines.length && !/^```\s*$/.test(lines[index])) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push({ type: "code", language: fence[1] || "", text: code.join("\n") });
+      continue;
+    }
+
+    if (isTableStart(lines, index)) {
+      const tableLines = [lines[index], lines[index + 1]];
+      index += 2;
+      while (index < lines.length && /\|/.test(lines[index]) && lines[index].trim()) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      blocks.push({ type: "table", lines: tableLines });
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2].trim() });
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered: false, items });
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered: true, items });
+      continue;
+    }
+
+    const quote = line.match(/^\s*>\s?(.*)$/);
+    if (quote) {
+      const parts = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        parts.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "quote", text: parts.join("\n") });
+      continue;
+    }
+
+    const paragraph = [line.trim()];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^```/.test(lines[index]) &&
+      !isTableStart(lines, index) &&
+      !/^(#{1,3})\s+/.test(lines[index]) &&
+      !/^\s*[-*]\s+/.test(lines[index]) &&
+      !/^\s*\d+\.\s+/.test(lines[index]) &&
+      !/^\s*>\s?/.test(lines[index])
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push({ type: "paragraph", text: paragraph.join("\n") });
+  }
+
+  return blocks;
+}
+
+function renderMarkdownBlock(block) {
+  if (block.type === "code") {
+    const wrapper = document.createElement("div");
+    wrapper.className = "code-block";
+    if (block.language) {
+      const label = document.createElement("div");
+      label.className = "code-language";
+      label.textContent = block.language;
+      wrapper.append(label);
+    }
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = block.text;
+    pre.append(code);
+    wrapper.append(pre);
+    return wrapper;
+  }
+
+  if (block.type === "table") {
+    return renderMarkdownTable(block.lines);
+  }
+
+  if (block.type === "heading") {
+    const heading = document.createElement(block.level === 1 ? "h3" : "h4");
+    appendInlineMarkdown(heading, block.text);
+    return heading;
+  }
+
+  if (block.type === "list") {
+    const list = document.createElement(block.ordered ? "ol" : "ul");
+    for (const item of block.items) {
+      const li = document.createElement("li");
+      appendInlineMarkdown(li, item);
+      list.append(li);
+    }
+    return list;
+  }
+
+  if (block.type === "quote") {
+    const quote = document.createElement("blockquote");
+    for (const [index, part] of block.text.split("\n").entries()) {
+      if (index) quote.append(document.createElement("br"));
+      appendInlineMarkdown(quote, part);
+    }
+    return quote;
+  }
+
+  const paragraph = document.createElement("p");
+  const parts = String(block.text || "").split("\n");
+  for (const [index, part] of parts.entries()) {
+    if (index) paragraph.append(document.createElement("br"));
+    appendInlineMarkdown(paragraph, part);
+  }
+  return paragraph;
+}
+
+function renderMarkdownTable(lines) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "table-wrap";
+  const table = document.createElement("table");
+  const headerCells = splitTableRow(lines[0]);
+  const bodyRows = lines.slice(2).map(splitTableRow).filter((row) => row.length);
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const cell of headerCells) {
+    const th = document.createElement("th");
+    appendInlineMarkdown(th, cell);
+    headerRow.append(th);
+  }
+  thead.append(headerRow);
+  table.append(thead);
+  const tbody = document.createElement("tbody");
+  for (const row of bodyRows) {
+    const tr = document.createElement("tr");
+    for (const cell of row) {
+      const td = document.createElement("td");
+      appendInlineMarkdown(td, cell);
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  wrapper.append(table);
+  return wrapper;
+}
+
+function appendInlineMarkdown(parent, text) {
+  const value = String(text || "");
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>"']+)/g;
   let lastIndex = 0;
 
-  for (const match of value.matchAll(urlPattern)) {
-    const url = match[0].replace(/[),.;:!?]+$/g, "");
-    const trailing = match[0].slice(url.length);
-
+  for (const match of value.matchAll(pattern)) {
     if (match.index > lastIndex) {
-      element.append(document.createTextNode(value.slice(lastIndex, match.index)));
+      parent.append(document.createTextNode(value.slice(lastIndex, match.index)));
     }
 
-    const link = document.createElement("a");
-    link.href = url;
-    link.textContent = url;
-    link.target = "_blank";
-    link.rel = "noreferrer";
-    element.append(link);
-
-    if (trailing) {
-      element.append(document.createTextNode(trailing));
+    const token = match[0];
+    if (token.startsWith("`") && token.endsWith("`")) {
+      const code = document.createElement("code");
+      code.textContent = token.slice(1, -1);
+      parent.append(code);
+    } else if (token.startsWith("**") && token.endsWith("**")) {
+      const strong = document.createElement("strong");
+      strong.textContent = token.slice(2, -2);
+      parent.append(strong);
+    } else {
+      const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+      const url = markdownLink ? markdownLink[2] : token.replace(/[),.;:!?]+$/g, "");
+      const trailing = markdownLink ? "" : token.slice(url.length);
+      const link = document.createElement("a");
+      link.href = url;
+      link.textContent = markdownLink ? markdownLink[1] : url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      parent.append(link);
+      if (trailing) parent.append(document.createTextNode(trailing));
     }
 
-    lastIndex = match.index + match[0].length;
+    lastIndex = match.index + token.length;
   }
 
   if (lastIndex < value.length) {
-    element.append(document.createTextNode(value.slice(lastIndex)));
+    parent.append(document.createTextNode(value.slice(lastIndex)));
   }
+}
+
+function isTableStart(lines, index) {
+  return Boolean(
+    lines[index] &&
+      lines[index + 1] &&
+      /\|/.test(lines[index]) &&
+      /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(lines[index + 1])
+  );
+}
+
+function splitTableRow(line) {
+  return String(line || "")
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function applyTheme(theme) {
+  const nextTheme = theme === "dark" ? "dark" : "light";
+  document.body.dataset.theme = nextTheme;
+  localStorage.setItem(themeStorageKey, nextTheme);
+  lightThemeButton.classList.toggle("active", nextTheme === "light");
+  darkThemeButton.classList.toggle("active", nextTheme === "dark");
 }
 
 function resizeInput() {
