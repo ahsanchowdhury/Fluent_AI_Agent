@@ -203,11 +203,17 @@ export function changePluginStatus(config, pluginFile, action) {
       echo wp_json_encode(array('ok' => false, 'message' => 'Plugin not found: ' . $plugin_file));
       exit;
     }
+    $warning = '';
     if (${JSON.stringify(action)} === 'activate') {
+      ob_start();
       $result = activate_plugin($plugin_file);
+      $activation_output = trim(ob_get_clean());
       if (is_wp_error($result)) {
-        echo wp_json_encode(array('ok' => false, 'message' => $result->get_error_message()));
-        exit;
+        if (!is_plugin_active($plugin_file)) {
+          echo wp_json_encode(array('ok' => false, 'message' => $result->get_error_message(), 'output' => $activation_output));
+          exit;
+        }
+        $warning = $result->get_error_message();
       }
     } else {
       deactivate_plugins($plugin_file);
@@ -217,6 +223,7 @@ export function changePluginStatus(config, pluginFile, action) {
       'action' => ${JSON.stringify(action)},
       'plugin' => $plugin_file,
       'active' => is_plugin_active($plugin_file),
+      'warning' => $warning,
     ));
   `;
 

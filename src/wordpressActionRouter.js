@@ -11,6 +11,7 @@ import {
 
 export async function detectWordPressAction(config, message, options = {}) {
   const normalized = normalize(message);
+  const supportQuestion = isLikelySupportQuestion(message, normalized);
 
   const pendingContentAction = detectPendingContentAction(message, normalized, options);
   if (pendingContentAction) {
@@ -53,6 +54,10 @@ export async function detectWordPressAction(config, message, options = {}) {
   const followUpPluginAction = detectPluginFollowUp(normalized, options);
 
   if ((pluginAction && !normalized.includes("theme")) || followUpPluginAction) {
+    if (supportQuestion && !isExplicitPluginManagementRequest(normalized)) {
+      return null;
+    }
+
     const action = normalizeAction(followUpPluginAction?.action || pluginAction[1]);
     const rawTarget = followUpPluginAction?.target || pluginAction[2];
     const target = cleanTarget(rawTarget);
@@ -80,6 +85,10 @@ export async function detectWordPressAction(config, message, options = {}) {
     normalized.match(/\bswitch\s+to\s+(.+)/) ||
     normalized.match(/\bchange\s+to\s+(.+)/);
   if (themeAction) {
+    if (supportQuestion && !isExplicitThemeManagementRequest(normalized)) {
+      return null;
+    }
+
     const target = cleanTarget(themeAction[1]);
     const themes = await listThemes(config);
     if (!themes.ok) {
@@ -335,6 +344,41 @@ function isDeactivateAllPluginsRequest(normalized) {
     /\b(deactivate|disable)\b/.test(normalized) &&
     /\b(all|every)\b/.test(normalized) &&
     /\bplugins?\b/.test(normalized)
+  );
+}
+
+function isLikelySupportQuestion(message, normalized) {
+  const raw = String(message || "");
+  const longMessage = raw.length > 180;
+  const hasQuestionShape =
+    raw.includes("?") ||
+    /\b(hello|hi)\s+.+\bsupport\b/.test(normalized) ||
+    /\b(need help|i am using|i m using|i would like|i cannot|i can not|i could not|i do not|i dont|my goal|as a workaround|the issue is|at the moment|to conclude|please advise|please advice|thank you)\b/.test(normalized) ||
+    /\b(is there|if not|built in|recommended workaround|recommended way|how can|how do|can i|could i|should i|would it)\b/.test(normalized) ||
+    /\b\d+\s+(global|stock|price|plugin|variation|category|slug|mapping|workaround)\b/.test(normalized);
+
+  const mentionsFeatureContext =
+    /\b(stock|subscription|variation|digital product|price|limit|access|community|csv|import|mapping|field|category|slug|workaround|built in)\b/.test(normalized);
+
+  return (longMessage && mentionsFeatureContext) || hasQuestionShape;
+}
+
+function isExplicitPluginManagementRequest(normalized) {
+  if (/\b(price|stock|subscription|variation|digital product|offer|access|community|category|slug|csv|import|mapping|field)\b/.test(normalized)) {
+    return false;
+  }
+
+  return (
+    /^(?:please\s+)?(?:reactivate|activate|enable|deactivagte|deactivate|disable)\s+.+\b(?:plugin|extension|addon|add on)\b/.test(normalized) ||
+    /^(?:please\s+)?(?:reactivate|activate|enable|deactivagte|deactivate|disable)\s+[a-z0-9][a-z0-9 ]{1,80}$/.test(normalized) ||
+    /\b(?:reactivate|activate|enable|deactivagte|deactivate|disable)\s+all\s+plugins?\b/.test(normalized)
+  );
+}
+
+function isExplicitThemeManagementRequest(normalized) {
+  return (
+    /^(?:please\s+)?(?:activate|switch|change|set)\s+(?:theme\s+)?(?:to\s+)?[a-z0-9][a-z0-9 ]{1,80}$/.test(normalized) ||
+    /\b(?:activate|switch|change|set)\s+theme\s+(?:to\s+)?[a-z0-9][a-z0-9 ]{1,80}$/.test(normalized)
   );
 }
 
