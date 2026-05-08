@@ -34,8 +34,9 @@ export function getIndexableFileEntries(config, options = {}) {
 
   if (shouldIncludeDocs(rootPath) && config.docsRoot && fs.existsSync(config.docsRoot)) {
     const maxDocs = options.maxDocs || config.indexMaxDocs || 500;
+    const docsPath = docsPathFromIndexTarget(rootPath);
     const docs = maxDocs
-      ? listFiles(config.docsRoot, { path: ".", maxFiles: maxDocs })
+      ? listFiles(config.docsRoot, { path: docsPath, maxFiles: maxDocs })
           .filter((file) => INDEXABLE_EXTENSIONS.has(path.extname(file).toLowerCase()))
           .map((file) => ({
             source: "docs",
@@ -47,7 +48,7 @@ export function getIndexableFileEntries(config, options = {}) {
     entries.push(...docs);
   }
 
-  if (rootPath !== "docs") {
+  if (!isDocsOnlyTarget(rootPath)) {
     const files = listFiles(config.pluginRoot, { path: rootPath, maxFiles });
     entries.push(
       ...files
@@ -362,7 +363,19 @@ function mimeTypeForPath(filePath) {
 }
 
 function shouldIncludeDocs(rootPath) {
-  return rootPath === "." || rootPath === "" || rootPath === "docs";
+  return rootPath === "." || rootPath === "" || rootPath === "docs" || rootPath.startsWith("docs/");
+}
+
+function isDocsOnlyTarget(rootPath) {
+  return rootPath === "docs" || rootPath.startsWith("docs/");
+}
+
+function docsPathFromIndexTarget(rootPath) {
+  if (rootPath.startsWith("docs/")) {
+    return rootPath.slice("docs/".length) || ".";
+  }
+
+  return ".";
 }
 
 function docBundleGroupName(displayPath) {

@@ -7,9 +7,19 @@ Use this style for customer-facing support answers.
 ## Priority
 
 1. Answer directly first.
-2. State the verified source briefly.
-3. Give practical steps or a mapping table.
-4. Mention limitations only when they change what the customer should do next.
+2. Search `docs/golden-answers/` for a matching saved reply before drafting from scratch.
+3. State the verified source briefly when useful.
+4. Give practical steps or a mapping table.
+5. Mention limitations only when they change what the customer should do next.
+
+## Golden Answers
+
+- Golden answers are saved reply templates.
+- Use a golden answer only when the customer's question clearly matches the "When To Use" section.
+- Adapt the reply to the customer's exact wording and remove irrelevant parts.
+- Preserve important links, placeholders such as `{{customer.first_name}}`, policy details, and step order.
+- If multiple golden answers overlap, combine only the relevant parts and avoid repeating the same instruction twice.
+- If no golden answer matches, answer from product docs/code instead.
 
 ## Tone
 

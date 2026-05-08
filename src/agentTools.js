@@ -101,6 +101,56 @@ export const agentTools = [
   },
   {
     type: "function",
+    name: "search_docs",
+    description:
+      "Search local company docs and saved replies. Use this first for support questions, especially docs/golden-answers saved reply templates.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Relative path under the docs root, for example 'golden-answers' or '.'.",
+        },
+        query: {
+          type: "string",
+          description: "Words to search for in docs or saved replies.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of matches to return. Defaults to 40.",
+        },
+        maxFiles: {
+          type: "number",
+          description: "Maximum number of files to scan. Defaults to 2500.",
+        },
+      },
+      required: ["path", "query", "maxResults", "maxFiles"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "read_doc",
+    description:
+      "Read one local company doc or saved reply file. Paths must be relative to the docs root.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Relative doc path, for example 'golden-answers/wpmanageninja-account-billing-saved-replies.md'.",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "tail_debug_log",
     description:
       "Read the latest lines from the configured WordPress debug.log file.",
@@ -246,6 +296,23 @@ export async function runAgentTool(config, toolCall) {
           maxFiles: args.maxFiles || 1200,
         })
       );
+    }
+
+    if (toolCall.name === "search_docs") {
+      return toolResult(
+        true,
+        searchTextFiles(config.docsRoot, {
+          path: args.path || ".",
+          query: args.query || "",
+          maxResults: args.maxResults || 40,
+          maxFiles: args.maxFiles || 2500,
+        })
+      );
+    }
+
+    if (toolCall.name === "read_doc") {
+      const file = readTextFile(config.docsRoot, args.path);
+      return toolResult(true, file);
     }
 
     if (toolCall.name === "tail_debug_log") {
