@@ -190,7 +190,13 @@ export async function createCodeVectorStore(client, config, options = {}) {
   const uploadables = [];
 
   for (const fileEntry of files) {
-    const file = readTextFile(fileEntry.root, fileEntry.path);
+    let file;
+    try {
+      file = readTextFile(fileEntry.root, fileEntry.path);
+    } catch (_error) {
+      continue;
+    }
+
     const content = [
       `Source: ${fileEntry.source}`,
       `Relative path: ${fileEntry.displayPath}`,
