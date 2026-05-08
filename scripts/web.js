@@ -284,8 +284,10 @@ function buildMessageActionPrompt(action, { text, history }) {
     "Summarize the full chat context in bullet points.",
     "Use concise bullets grouped by topic when useful.",
     "Include decisions, user preferences, completed work, open items, links, and important technical details.",
+    text ? "Also include the user's current unsent draft under a 'Current draft:' bullet if it matters." : "",
     "End with a footer titled 'Short summary:' containing 1-2 sentences.",
     "",
+    text ? `Current unsent draft:\n${text}\n` : "",
     "Conversation history JSON:",
     JSON.stringify(history.map((message) => ({
       role: message.role,

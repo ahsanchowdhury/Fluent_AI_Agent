@@ -571,14 +571,6 @@ textarea:focus {
   font-weight: 700;
 }
 
-.message-actions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 5px;
-}
-
 .copy-button {
   width: auto;
   border-color: var(--line);
@@ -588,11 +580,6 @@ textarea:focus {
   border-radius: 7px;
   font-size: 11px;
   font-weight: 750;
-}
-
-.action-button {
-  padding-inline: 7px;
-  white-space: nowrap;
 }
 
 .copy-button:hover {
@@ -609,7 +596,7 @@ textarea:focus {
 
 .composer-box {
   display: grid;
-  grid-template-columns: 42px 1fr 92px;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: end;
   gap: 10px;
   max-width: 980px;
@@ -618,6 +605,37 @@ textarea:focus {
   border-radius: 14px;
   background: var(--field-bg);
   padding: 10px;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.composer-action-button {
+  width: auto;
+  min-height: 42px;
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--ink);
+  padding: 8px 9px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.composer-action-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.composer-actions #sendButton {
+  width: auto;
+  min-width: 82px;
+  min-height: 42px;
 }
 
 .icon-button {
@@ -766,12 +784,12 @@ textarea:focus {
     min-height: 72vh;
   }
 
-  .meta {
-    align-items: flex-start;
-    flex-direction: column;
+  .composer-box {
+    grid-template-columns: 42px minmax(0, 1fr);
   }
 
-  .message-actions {
-    justify-content: flex-start;
+  .composer-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
   }
 }

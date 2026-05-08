@@ -12,6 +12,8 @@ const conversationList = document.querySelector("#conversationList");
 const siteLabel = document.querySelector("#siteLabel");
 const syncBadge = document.querySelector("#syncBadge");
 const sendButton = document.querySelector("#sendButton");
+const summarizeContextButton = document.querySelector("#summarizeContextButton");
+const rewriteButton = document.querySelector("#rewriteButton");
 const imageInput = document.querySelector("#imageInput");
 const attachImageButton = document.querySelector("#attachImageButton");
 const imagePreviewList = document.querySelector("#imagePreviewList");
@@ -34,6 +36,8 @@ attachImageButton.addEventListener("click", () => imageInput.click());
 imageInput.addEventListener("change", handleImageSelection);
 lightThemeButton.addEventListener("click", () => applyTheme("light"));
 darkThemeButton.addEventListener("click", () => applyTheme("dark"));
+summarizeContextButton.addEventListener("click", () => runComposerAction("summarize_context"));
+rewriteButton.addEventListener("click", () => runComposerAction("rewrite"));
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -293,25 +297,12 @@ function appendMessage(messageData) {
   metaLabel.textContent = `${messageData.role === "user" ? "You" : messageData.role === "system" ? "System" : "Agent"} · ${formatTime(messageData.createdAt)}`;
   meta.append(metaLabel);
   if (messageData.role === "assistant") {
-    const actions = document.createElement("div");
-    actions.className = "message-actions";
-    const summarizeButton = document.createElement("button");
-    summarizeButton.className = "copy-button action-button";
-    summarizeButton.type = "button";
-    summarizeButton.textContent = "Summarise Context";
-    summarizeButton.addEventListener("click", () => runMessageAction("summarize_context", messageData, summarizeButton));
-    const rewriteButton = document.createElement("button");
-    rewriteButton.className = "copy-button action-button";
-    rewriteButton.type = "button";
-    rewriteButton.textContent = "Re-Write";
-    rewriteButton.addEventListener("click", () => runMessageAction("rewrite", messageData, rewriteButton));
     const copyButton = document.createElement("button");
     copyButton.className = "copy-button";
     copyButton.type = "button";
     copyButton.textContent = "Copy";
     copyButton.addEventListener("click", () => copyText(messageData.text, copyButton));
-    actions.append(summarizeButton, rewriteButton, copyButton);
-    meta.append(actions);
+    meta.append(copyButton);
   }
   const body = document.createElement("div");
   body.className = "body";
@@ -363,19 +354,27 @@ function setMessageImages(row, images = []) {
 
 function setBusy(isBusy) {
   sendButton.disabled = isBusy;
+  summarizeContextButton.disabled = isBusy;
+  rewriteButton.disabled = isBusy;
   attachImageButton.disabled = isBusy;
   sendButton.textContent = isBusy ? "Sending" : "Send";
 }
 
-async function runMessageAction(action, messageData, button) {
+async function runComposerAction(action) {
+  const draft = input.value.trim();
+  if (action === "rewrite" && !draft) {
+    addMessage("system", "Type or paste the text you want to rewrite first.");
+    return;
+  }
+
   const label = action === "rewrite" ? "Rewriting response" : "Summarising context";
   const pending = addThinkingMessage(label);
-  button.disabled = true;
+  setBusy(true);
 
   try {
     const result = await postJson("/api/message-action", {
       action,
-      text: messageData.text || "",
+      text: draft,
       history: getActiveConversation().messages,
     });
     setMessageText(pending, result.text || "(No response)");
@@ -383,7 +382,7 @@ async function runMessageAction(action, messageData, button) {
     setMessageText(pending, `Error: ${error.message}`);
     pending.querySelector(".message").classList.add("system");
   } finally {
-    button.disabled = false;
+    setBusy(false);
   }
 }
 

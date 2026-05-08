@@ -70,7 +70,11 @@
             <input id="imageInput" class="sr-only" type="file" accept="image/png,image/jpeg,image/webp" multiple />
             <button id="attachImageButton" class="icon-button" type="button" title="Attach image" aria-label="Attach image">+</button>
             <textarea id="messageInput" placeholder="Ask about plugin code, debug errors, browser issues, or patches..." rows="1"></textarea>
-            <button id="sendButton" type="submit">Send</button>
+            <div class="composer-actions">
+              <button id="summarizeContextButton" class="composer-action-button" type="button">Summarise Context</button>
+              <button id="rewriteButton" class="composer-action-button" type="button">Re-Write</button>
+              <button id="sendButton" type="submit">Send</button>
+            </div>
           </div>
         </form>
       </section>
