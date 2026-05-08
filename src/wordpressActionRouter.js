@@ -391,19 +391,23 @@ function detectPendingContentAction(message, normalized, options) {
 }
 
 function detectCreateContentAction(message, normalized) {
-  if (/\b(how|snippet|code|example|write|explain|why)\b/.test(normalized)) {
+  if (isInformationalContentQuestion(normalized)) {
     return null;
   }
 
-  const wantsCreate = /\b(create|make|add|publish|draft)\b/.test(normalized);
-  const mentionsContent = /\b(page|post|blog post|article)\b/.test(normalized);
-  if (!wantsCreate || !mentionsContent) {
-    return null;
-  }
-
-  const postType = /\bpage\b/.test(normalized) ? "page" : "post";
-  const status = /\bdraft\b/.test(normalized) ? "draft" : "publish";
   const details = extractContentDetails(message);
+  const explicitCreate = getExplicitCreateContentType(normalized);
+  const typedDetails =
+    details.title &&
+    details.content &&
+    (/\bpage\b/.test(normalized) || /\bpost\b/.test(normalized) || /\bblog\b/.test(normalized) || /\barticle\b/.test(normalized));
+
+  if (!explicitCreate && !typedDetails) {
+    return null;
+  }
+
+  const postType = explicitCreate || (/\bpage\b/.test(normalized) ? "page" : "post");
+  const status = /\bdraft\b/.test(normalized) ? "draft" : "publish";
   const pendingContent = {
     postType,
     status,
@@ -427,6 +431,38 @@ function detectCreateContentAction(message, normalized) {
   };
 }
 
+function isInformationalContentQuestion(normalized) {
+  return (
+    /\b(how|what|when|where|why|which|can|could|should|would|is|are|do|does|did|snippet|code|example|write|explain|show|list|find|check|debug|fix|help)\b/.test(normalized) &&
+    !/\b(create|make|add|publish|draft)\s+(?:(?:a|an|new|wordpress)\s+){0,3}(?:page|post|blog|article)\b/.test(normalized)
+  );
+}
+
+function getExplicitCreateContentType(normalized) {
+  const createPagePatterns = [
+    /\b(?:create|make|add|publish|draft)\s+(?:(?:a|an|new|wordpress)\s+){0,3}page\b/,
+    /\b(?:create|make|add|publish|draft)\s+(?:(?:a|an|new|wordpress)\s+){0,3}landing\s+page\b/,
+    /\b(?:create|make|add|publish|draft)\s+page\s+(?:called|named|titled|with|for)\b/,
+  ];
+
+  if (createPagePatterns.some((pattern) => pattern.test(normalized))) {
+    return "page";
+  }
+
+  const createPostPatterns = [
+    /\b(?:create|make|add|publish|draft)\s+(?:(?:a|an|new|wordpress)\s+){0,3}post\b/,
+    /\b(?:create|make|add|publish|draft)\s+(?:(?:a|an|new|wordpress)\s+){0,3}blog\s+post\b/,
+    /\b(?:create|make|add|publish|draft)\s+(?:(?:a|an|new)\s+){0,3}article\b/,
+    /\b(?:create|make|add|publish|draft)\s+post\s+(?:called|named|titled|with|for)\b/,
+  ];
+
+  if (createPostPatterns.some((pattern) => pattern.test(normalized))) {
+    return "post";
+  }
+
+  return null;
+}
+
 function extractContentDetails(message) {
   const text = String(message || "").trim();
   const title =
@@ -446,7 +482,7 @@ function extractContentDetails(message) {
 function extractLabelValue(text, labels) {
   for (const label of labels) {
     const pattern = new RegExp(
-      `(?:^|\\n|\\b)${escapeRegExp(label)}\\s*[:=-]\\s*([\\s\\S]*?)(?=\\n\\s*(?:title|page title|post title|content|body|description|page content|post content)\\s*[:=-]|$)`,
+      `(?:^|\\n|\\b)${escapeRegExp(label)}\\s*[:=-]\\s*([\\s\\S]*?)(?=\\s+(?:title|content|body|description)\\s*[:=-]|$)`,
       "i"
     );
     const match = text.match(pattern);
