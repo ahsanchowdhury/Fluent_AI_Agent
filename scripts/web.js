@@ -177,6 +177,38 @@ app.post("/api/chat", async (request, response) => {
   }
 });
 
+app.post("/api/message-action", async (request, response) => {
+  const action = String(request.body?.action || "").trim();
+  const text = String(request.body?.text || "").trim();
+  const history = Array.isArray(request.body?.history) ? request.body.history : [];
+
+  if (!["summarize_context", "rewrite"].includes(action)) {
+    response.status(400).json({ error: "Unknown message action." });
+    return;
+  }
+
+  if (action === "rewrite" && !text) {
+    response.status(400).json({ error: "Response text is required." });
+    return;
+  }
+
+  try {
+    const result = await client.responses.create({
+      model: config.openaiModel,
+      instructions: [
+        "You are helping refine a WordPress support-agent chat.",
+        "Do not activate plugins, change themes, install anything, browse pages, or perform site actions.",
+        "Return only the requested text. Do not mention that you are an AI.",
+      ].join("\n"),
+      input: buildMessageActionPrompt(action, { text, history }),
+    });
+
+    response.json({ text: result.output_text || "" });
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
 app.post("/api/reset", (request, response) => {
   const conversationId = String(request.body?.conversationId || "default");
   conversations.delete(conversationId);
@@ -235,3 +267,30 @@ app.post("/api/index-sync", async (_request, response) => {
 app.listen(port, "127.0.0.1", () => {
   console.log(`Local WP AI Agent dashboard: http://127.0.0.1:${port}`);
 });
+
+function buildMessageActionPrompt(action, { text, history }) {
+  if (action === "rewrite") {
+    return [
+      "Rewrite this response in a more professional, polished support tone.",
+      "Keep the original meaning, steps, links, code blocks, and important technical details.",
+      "Make it clearer and more customer-ready. Do not add unsupported claims.",
+      "",
+      "Response to rewrite:",
+      text,
+    ].join("\n");
+  }
+
+  return [
+    "Summarize the full chat context in bullet points.",
+    "Use concise bullets grouped by topic when useful.",
+    "Include decisions, user preferences, completed work, open items, links, and important technical details.",
+    "End with a footer titled 'Short summary:' containing 1-2 sentences.",
+    "",
+    "Conversation history JSON:",
+    JSON.stringify(history.map((message) => ({
+      role: message.role,
+      text: message.text,
+      createdAt: message.createdAt,
+    })), null, 2),
+  ].join("\n");
+}

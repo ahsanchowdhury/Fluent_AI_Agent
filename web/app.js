@@ -293,12 +293,25 @@ function appendMessage(messageData) {
   metaLabel.textContent = `${messageData.role === "user" ? "You" : messageData.role === "system" ? "System" : "Agent"} · ${formatTime(messageData.createdAt)}`;
   meta.append(metaLabel);
   if (messageData.role === "assistant") {
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+    const summarizeButton = document.createElement("button");
+    summarizeButton.className = "copy-button action-button";
+    summarizeButton.type = "button";
+    summarizeButton.textContent = "Summarise Context";
+    summarizeButton.addEventListener("click", () => runMessageAction("summarize_context", messageData, summarizeButton));
+    const rewriteButton = document.createElement("button");
+    rewriteButton.className = "copy-button action-button";
+    rewriteButton.type = "button";
+    rewriteButton.textContent = "Re-Write";
+    rewriteButton.addEventListener("click", () => runMessageAction("rewrite", messageData, rewriteButton));
     const copyButton = document.createElement("button");
     copyButton.className = "copy-button";
     copyButton.type = "button";
     copyButton.textContent = "Copy";
     copyButton.addEventListener("click", () => copyText(messageData.text, copyButton));
-    meta.append(copyButton);
+    actions.append(summarizeButton, rewriteButton, copyButton);
+    meta.append(actions);
   }
   const body = document.createElement("div");
   body.className = "body";
@@ -352,6 +365,26 @@ function setBusy(isBusy) {
   sendButton.disabled = isBusy;
   attachImageButton.disabled = isBusy;
   sendButton.textContent = isBusy ? "Sending" : "Send";
+}
+
+async function runMessageAction(action, messageData, button) {
+  const label = action === "rewrite" ? "Rewriting response" : "Summarising context";
+  const pending = addThinkingMessage(label);
+  button.disabled = true;
+
+  try {
+    const result = await postJson("/api/message-action", {
+      action,
+      text: messageData.text || "",
+      history: getActiveConversation().messages,
+    });
+    setMessageText(pending, result.text || "(No response)");
+  } catch (error) {
+    setMessageText(pending, `Error: ${error.message}`);
+    pending.querySelector(".message").classList.add("system");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function handleImageSelection(event) {

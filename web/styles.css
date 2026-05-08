@@ -571,6 +571,14 @@ textarea:focus {
   font-weight: 700;
 }
 
+.message-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
 .copy-button {
   width: auto;
   border-color: var(--line);
@@ -580,6 +588,11 @@ textarea:focus {
   border-radius: 7px;
   font-size: 11px;
   font-weight: 750;
+}
+
+.action-button {
+  padding-inline: 7px;
+  white-space: nowrap;
 }
 
 .copy-button:hover {
@@ -751,5 +764,14 @@ textarea:focus {
 
   .chat {
     min-height: 72vh;
+  }
+
+  .meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .message-actions {
+    justify-content: flex-start;
   }
 }
