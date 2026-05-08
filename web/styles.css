@@ -502,10 +502,18 @@ textarea:focus {
   background: var(--code-bg);
 }
 
-.code-language {
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   border-bottom: 1px solid var(--line);
+  gap: 10px;
+  min-height: 34px;
+  padding: 5px 8px 5px 10px;
+}
+
+.code-language {
   color: var(--muted);
-  padding: 6px 10px;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-size: 11px;
 }
@@ -553,10 +561,31 @@ textarea:focus {
 }
 
 .meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 4px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.copy-button {
+  width: auto;
+  border-color: var(--line);
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 4px 8px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.copy-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
 }
 
 .composer {

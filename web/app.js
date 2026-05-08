@@ -289,7 +289,17 @@ function appendMessage(messageData) {
   message.className = `message ${messageData.role}`;
   const meta = document.createElement("div");
   meta.className = "meta";
-  meta.textContent = `${messageData.role === "user" ? "You" : messageData.role === "system" ? "System" : "Agent"} · ${formatTime(messageData.createdAt)}`;
+  const metaLabel = document.createElement("span");
+  metaLabel.textContent = `${messageData.role === "user" ? "You" : messageData.role === "system" ? "System" : "Agent"} · ${formatTime(messageData.createdAt)}`;
+  meta.append(metaLabel);
+  if (messageData.role === "assistant") {
+    const copyButton = document.createElement("button");
+    copyButton.className = "copy-button";
+    copyButton.type = "button";
+    copyButton.textContent = "Copy";
+    copyButton.addEventListener("click", () => copyText(messageData.text, copyButton));
+    meta.append(copyButton);
+  }
   const body = document.createElement("div");
   body.className = "body";
   renderMessageBody(body, messageData.text);
@@ -523,12 +533,21 @@ function renderMarkdownBlock(block) {
   if (block.type === "code") {
     const wrapper = document.createElement("div");
     wrapper.className = "code-block";
+    const codeHeader = document.createElement("div");
+    codeHeader.className = "code-header";
     if (block.language) {
       const label = document.createElement("div");
       label.className = "code-language";
       label.textContent = block.language;
-      wrapper.append(label);
+      codeHeader.append(label);
     }
+    const copyButton = document.createElement("button");
+    copyButton.className = "copy-button";
+    copyButton.type = "button";
+    copyButton.textContent = "Copy code";
+    copyButton.addEventListener("click", () => copyText(block.text, copyButton));
+    codeHeader.append(copyButton);
+    wrapper.append(codeHeader);
     const pre = document.createElement("pre");
     const code = document.createElement("code");
     code.textContent = block.text;
@@ -669,6 +688,34 @@ function applyTheme(theme) {
   localStorage.setItem(themeStorageKey, nextTheme);
   lightThemeButton.classList.toggle("active", nextTheme === "light");
   darkThemeButton.classList.toggle("active", nextTheme === "dark");
+}
+
+async function copyText(text, button) {
+  try {
+    await navigator.clipboard.writeText(String(text || ""));
+    flashCopyState(button, "Copied");
+  } catch (_error) {
+    const textarea = document.createElement("textarea");
+    textarea.value = String(text || "");
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.append(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+    flashCopyState(button, "Copied");
+  }
+}
+
+function flashCopyState(button, label) {
+  const original = button.textContent;
+  button.textContent = label;
+  button.disabled = true;
+  setTimeout(() => {
+    button.textContent = original;
+    button.disabled = false;
+  }, 1200);
 }
 
 function resizeInput() {
