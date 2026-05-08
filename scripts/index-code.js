@@ -10,7 +10,7 @@ const targetPath = args.find((arg) => !arg.startsWith("--")) || ".";
 const files = getIndexableFiles(config, { path: targetPath });
 
 console.log(`Index target: ${targetPath}`);
-console.log(`Indexable files: ${files.length}`);
+console.log(`Indexable code/doc files: ${files.length}`);
 console.log("");
 
 for (const file of files.slice(0, 80)) {
@@ -23,7 +23,7 @@ if (files.length > 80) {
 
 if (!shouldUpload) {
   console.log("");
-  console.log("Dry run only. Add --yes to create an OpenAI vector store and upload these files.");
+  console.log("Dry run only. Add --yes to create an OpenAI vector store and upload these code/doc files.");
   process.exit(0);
 }
 

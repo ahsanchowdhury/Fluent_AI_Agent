@@ -11,35 +11,75 @@ const INDEXABLE_EXTENSIONS = new Set([
   ".css",
   ".html",
   ".json",
+  ".csv",
   ".md",
   ".txt",
+  ".xml",
+  ".yml",
+  ".yaml",
   ".sh",
 ]);
 
 export function getIndexableFiles(config, options = {}) {
   const rootPath = options.path || ".";
   const maxFiles = options.maxFiles || config.indexMaxFiles || 300;
-  const files = listFiles(config.pluginRoot, { path: rootPath, maxFiles });
+  return getIndexableFileEntries(config, { ...options, path: rootPath }).map((entry) => entry.path);
+}
 
-  return files.filter((file) => INDEXABLE_EXTENSIONS.has(path.extname(file).toLowerCase()));
+export function getIndexableFileEntries(config, options = {}) {
+  const rootPath = options.path || ".";
+  const maxFiles = options.maxFiles || config.indexMaxFiles || 300;
+  const entries = [];
+
+  if (shouldIncludeDocs(rootPath) && config.docsRoot && fs.existsSync(config.docsRoot)) {
+    const maxDocs = options.maxDocs || config.indexMaxDocs || 500;
+    const docs = maxDocs
+      ? listFiles(config.docsRoot, { path: ".", maxFiles: maxDocs })
+          .filter((file) => INDEXABLE_EXTENSIONS.has(path.extname(file).toLowerCase()))
+          .map((file) => ({
+            source: "docs",
+            root: config.docsRoot,
+            path: file,
+            displayPath: `docs/${file}`,
+          }))
+      : [];
+    entries.push(...docs);
+  }
+
+  if (rootPath !== "docs") {
+    const files = listFiles(config.pluginRoot, { path: rootPath, maxFiles });
+    entries.push(
+      ...files
+        .filter((file) => INDEXABLE_EXTENSIONS.has(path.extname(file).toLowerCase()))
+        .map((file) => ({
+          source: "plugin",
+          root: config.pluginRoot,
+          path: file,
+          displayPath: file,
+        }))
+    );
+  }
+
+  return entries;
 }
 
 export function buildIndexManifest(config, options = {}) {
-  const files = getIndexableFiles(config, options);
+  const files = getIndexableFileEntries(config, options);
   const skipped = [];
   const entries = [];
 
-  for (const relativePath of files) {
+  for (const fileEntry of files) {
     try {
-      const file = readTextFile(config.pluginRoot, relativePath);
+      const file = readTextFile(fileEntry.root, fileEntry.path);
       entries.push({
-        path: relativePath,
+        path: fileEntry.displayPath,
+        source: fileEntry.source,
         bytes: file.bytes,
         sha256: crypto.createHash("sha256").update(file.content).digest("hex"),
       });
     } catch (error) {
       skipped.push({
-        path: relativePath,
+        path: fileEntry.displayPath,
         reason: error.message,
       });
     }
@@ -51,6 +91,7 @@ export function buildIndexManifest(config, options = {}) {
     version: 1,
     createdAt: new Date().toISOString(),
     pluginRoot: config.pluginRoot,
+    docsRoot: config.docsRoot || "",
     indexedPath: options.path || ".",
     fileCount: entries.length,
     skippedCount: skipped.length,
@@ -129,36 +170,38 @@ export function diffManifests(previous, current) {
 }
 
 export async function createCodeVectorStore(client, config, options = {}) {
-  const files = getIndexableFiles(config, options);
+  const files = getIndexableFileEntries(config, options);
 
   if (!files.length) {
-    throw new Error("No indexable code files found.");
+    throw new Error("No indexable code or doc files found.");
   }
 
   const vectorStore = await client.vectorStores.create({
-    name: options.name || "Local WordPress Plugin Code",
+    name: options.name || "Local WordPress Plugin and Docs Memory",
     description:
-      "Local WordPress plugin code memory for the Fluent AI Agent development environment.",
+      "Local WordPress plugin code and company documentation memory for the Fluent AI Agent development environment.",
     metadata: {
       plugin_root: config.pluginRoot.slice(0, 512),
+      docs_root: String(config.docsRoot || "").slice(0, 512),
       indexed_path: options.path || ".",
     },
   });
 
   const uploadables = [];
 
-  for (const relativePath of files) {
-    const file = readTextFile(config.pluginRoot, relativePath);
+  for (const fileEntry of files) {
+    const file = readTextFile(fileEntry.root, fileEntry.path);
     const content = [
-      `Relative path: ${file.path}`,
+      `Source: ${fileEntry.source}`,
+      `Relative path: ${fileEntry.displayPath}`,
       `Bytes: ${file.bytes}`,
       "",
       file.content,
     ].join("\n");
 
     uploadables.push(
-      await toFile(Buffer.from(content, "utf8"), safeUploadName(relativePath), {
-        type: mimeTypeForPath(relativePath),
+      await toFile(Buffer.from(content, "utf8"), safeUploadName(fileEntry.displayPath), {
+        type: mimeTypeForPath(fileEntry.displayPath),
       })
     );
   }
@@ -231,12 +274,20 @@ function mimeTypeForPath(filePath) {
     ".css": "text/css",
     ".html": "text/html",
     ".json": "application/json",
+    ".csv": "text/csv",
     ".md": "text/markdown",
     ".txt": "text/plain",
+    ".xml": "application/xml",
+    ".yml": "application/x-yaml",
+    ".yaml": "application/x-yaml",
     ".sh": "application/x-sh",
   };
 
   return map[ext] || "text/plain";
+}
+
+function shouldIncludeDocs(rootPath) {
+  return rootPath === "." || rootPath === "" || rootPath === "docs";
 }
 
 function upsertEnvValue(envPath, key, value) {

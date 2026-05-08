@@ -46,6 +46,7 @@ export function getConfig() {
     pluginRoot:
       process.env.PLUGIN_ROOT ||
       "/Applications/XAMPP/xamppfiles/htdocs/sites/wp-content/plugins",
+    docsRoot: process.env.DOCS_ROOT || path.resolve(process.cwd(), "docs"),
     localSiteUrl: process.env.LOCAL_SITE_URL || "http://localhost/sites",
     wpDebugLog:
       process.env.WP_DEBUG_LOG ||
@@ -54,6 +55,7 @@ export function getConfig() {
     openaiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
     openaiVectorStoreId: process.env.OPENAI_VECTOR_STORE_ID || "",
     indexMaxFiles: Number(process.env.INDEX_MAX_FILES || 300),
+    indexMaxDocs: Number(process.env.INDEX_MAX_DOCS || 500),
     autoIndexOnChat: process.env.AUTO_INDEX_ON_CHAT === "true",
     autoIndexOnDebug: process.env.AUTO_INDEX_ON_DEBUG === "true",
   };

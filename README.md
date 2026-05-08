@@ -172,6 +172,43 @@ npm run browser:debug
 
 ## Code Memory
 
+## Docs Memory
+
+Put company/support documentation in:
+
+```txt
+docs/
+```
+
+Supported docs for direct indexing:
+
+```txt
+.md
+.txt
+.html
+.json
+.csv
+.xml
+.yml
+.yaml
+```
+
+Then sync memory:
+
+```bash
+npm run index:sync -- --yes
+```
+
+The agent checks indexed docs first for support answers, then plugin code and local site facts.
+
+By default, sync can include up to 500 docs plus the plugin-code file limit. You can raise this in `.env`:
+
+```env
+INDEX_MAX_DOCS=1000
+```
+
+For PDF/DOCX docs, convert them to Markdown or text before placing them in `docs/`. A PDF/DOCX importer can be added as the next step.
+
 Preview the files that would be uploaded to OpenAI file search:
 
 ```bash

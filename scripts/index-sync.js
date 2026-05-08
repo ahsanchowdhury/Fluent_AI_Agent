@@ -26,7 +26,7 @@ if (!diff.changed) {
 
 if (!shouldUpload) {
   console.log("");
-  console.log("Dry run only. Add --yes to create a fresh vector store for the current plugin code.");
+  console.log("Dry run only. Add --yes to create a fresh vector store for the current plugin code and docs.");
   process.exit(0);
 }
 
