@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { agentTools, runAgentTool } from "./agentTools.js";
+import { agentTools, runAgentTool, searchTrustedDocLinks } from "./agentTools.js";
 import { imageAttachmentsToContentItems } from "./imageInputs.js";
 import { getWordPressSiteSummary } from "./tools/wordpress.js";
 
@@ -21,6 +21,7 @@ export async function askModel(client, { input, config }) {
 export async function createAgentResponse(client, { input, config, previousResponseId = null, images = [] }) {
   const tools = buildTools(config);
   const siteFacts = await buildSiteFacts(config);
+  const docLinkHints = buildDocLinkHints(config, input);
   const normalizedInput = buildUserInput(input, images);
   const request = {
     model: config.openaiModel,
@@ -32,12 +33,16 @@ export async function createAgentResponse(client, { input, config, previousRespo
         ? "You also have file_search memory over indexed company docs and plugin code. For support answers, check company docs first, then plugin code/files."
         : "No vector store code memory is configured yet. Use local read-only tools instead.",
       "You may also read WordPress site facts, the WordPress debug log, lint PHP files, check WP-CLI plugin status, and visit the local site with a headless browser.",
-      "For client-style feature questions, act like a careful support agent: first search_docs in 'golden-answers' for a matching saved reply, then identify which installed plugin or product the client is asking about from the site facts and wording, then verify the requested feature in product docs/code/files as needed.",
+      "For client-style feature questions, act like a careful support agent: first search_docs in 'golden-answers' for a matching saved reply, then identify the product, then use search_doc_links for a relevant official documentation URL for that product, then verify the requested feature in product docs/code/files as needed.",
       "Do not hardcode Fluent Support as the primary plugin. Fluent Support is only one example. The primary plugin might be FluentCRM, Bit File Manager, Live Chat for Fluent Support, My Shop Loyalty System, Plugin Check, WP Debug Hub, or any other installed plugin.",
       "If the primary plugin has a Pro/add-on/extension folder in the installed plugin list, inspect both the base plugin and related add-on folders before concluding a feature is missing. For example, a Fluent Support question should check both 'fluent-support' and 'fluent-support-pro'.",
       "Do not answer feature-availability questions from memory alone. Use get_wordpress_site_summary and search_files/read_file or file_search before saying a plugin can or cannot do something.",
       "Use search_docs/read_doc for local docs and saved replies. Use file_search as a broad fallback, not as the only way to find saved replies.",
       "If company documentation appears in search_docs/read_doc or file_search results under docs/, treat product docs, tutorials, setup guides, and policies as the first source of truth.",
+      "Use search_doc_links as the preferred trusted official documentation link map. When adding documentation links, prefer URLs returned by search_doc_links over older copied docs or broad file_search results. Include a 'Documentation:' line with one or two clickable official links when the link clearly matches the customer's question. Do not invent URLs and do not include unrelated links.",
+      "Before finalizing any customer-facing answer that includes a documentation URL for a product feature, you must use search_doc_links and use the returned URL. Product docs copied under docs/wpmanageninja-all-docs are useful for content, but their embedded or legacy URLs must not be used as the final Documentation link when search_doc_links has a matching official URL.",
+      "Do not use wpmanageninja.com/docs product documentation URLs as the final Documentation link for Fluent products when docs.fluent*.com, fluent*.com/docs, ninjatables.com/docs, or docs.azonpress.com links are available from search_doc_links.",
+      "Do not include internal file-search citation markers such as 【...】 in customer-facing answers.",
       "Docs that are only style guides or answer-format guides must shape tone/format only; never cite them as evidence for product behavior.",
       "For support answers, optimize for customer usefulness over defensive wording. If inspected code/docs clearly support a behavior, answer directly. Avoid vague words like likely, apparently, usually, or seems unless the evidence is genuinely incomplete.",
       "For import/export, CSV, field mapping, settings, and configuration questions: search for the exact UI labels and internal field names, inspect the mapping/config files, then return a concise mapping table and practical CSV formatting guidance.",
@@ -62,6 +67,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       `Configured local site URL: ${config.localSiteUrl}`,
       `Configured WP debug log: ${config.wpDebugLog}`,
       siteFacts,
+      docLinkHints,
     ].join("\n"),
     tools,
     input: normalizedInput,
@@ -95,6 +101,9 @@ export async function createAgentResponse(client, { input, config, previousRespo
         "Continue answering using the read-only diagnostic and search tool results provided.",
         "For support questions, state which primary plugin you verified first, then any workaround found in other installed plugins.",
         "If a matching golden answer was found with search_docs/read_doc, adapt that saved reply and do not add unrelated developer/API details.",
+        "If a relevant official docs link was found with search_doc_links, include it under 'Documentation:' as a clickable link. Prefer search_doc_links URLs over older copied docs. Skip documentation links when the match is weak.",
+        "If the answer includes a product documentation URL, it must be a URL returned by search_doc_links when that tool has a matching result. Do not use copied-doc legacy URLs as the final Documentation link.",
+        "Do not include internal file-search citation markers such as 【...】 in the final answer.",
         "Turn verified evidence into a direct support answer. If labels/configs were found, give the recommended mapping or steps first. Avoid hedging when the tool results are enough.",
         "For CSV/import field mapping questions, return a clean mapping table plus notes for unmapped fields and automation options.",
         "Do not claim you edited files or inspected the database.",
@@ -109,6 +118,30 @@ export async function createAgentResponse(client, { input, config, previousRespo
     text: response.output_text || "",
     responseId: response.id,
   };
+}
+
+function buildDocLinkHints(config, input) {
+  const text = String(input || "").trim();
+
+  if (!text) {
+    return "Trusted documentation link candidates for this message: none";
+  }
+
+  const links = searchTrustedDocLinks(config, {
+    product: "",
+    query: text,
+    maxResults: 6,
+  }).results;
+
+  if (!links.length) {
+    return "Trusted documentation link candidates for this message: none";
+  }
+
+  return [
+    "Trusted documentation link candidates for this message:",
+    ...links.map((link) => `- ${link.product}: ${link.title} => ${link.url}`),
+    "Use these candidates for the final Documentation link when one matches the answer. Do not invent or rewrite these URLs.",
+  ].join("\n");
 }
 
 function buildUserInput(input, images = []) {

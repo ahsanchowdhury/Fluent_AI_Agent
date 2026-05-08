@@ -1,0 +1,72 @@
+[
+  {
+    "product": "Fluent Forms",
+    "slug": "fluent-forms",
+    "url": "https://fluentforms.com/docs/general-docs/"
+  },
+  {
+    "product": "FluentCRM",
+    "slug": "fluentcrm",
+    "url": "https://fluentcrm.com/docs/"
+  },
+  {
+    "product": "FluentSMTP",
+    "slug": "fluentsmtp",
+    "url": "https://fluentsmtp.com/docs/"
+  },
+  {
+    "product": "Fluent Boards",
+    "slug": "fluent-boards",
+    "url": "https://fluentboards.com/docs/"
+  },
+  {
+    "product": "FluentCommunity",
+    "slug": "fluentcommunity",
+    "url": "https://fluentcommunity.co/docs/"
+  },
+  {
+    "product": "FluentSnippets",
+    "slug": "fluentsnippets",
+    "url": "https://fluentsnippets.com/docs/"
+  },
+  {
+    "product": "Fluent Booking",
+    "slug": "fluent-booking",
+    "url": "https://fluentbooking.com/docs/"
+  },
+  {
+    "product": "Fluent Auth",
+    "slug": "fluent-auth",
+    "url": "https://fluentauth.com/docs/"
+  },
+  {
+    "product": "Fluent Affiliate",
+    "slug": "fluent-affiliate",
+    "url": "https://docs.fluentaffiliate.com/"
+  },
+  {
+    "product": "FluentCart",
+    "slug": "fluentcart",
+    "url": "https://docs.fluentcart.com/"
+  },
+  {
+    "product": "Fluent Support",
+    "slug": "fluent-support",
+    "url": "https://docs.fluentsupport.com/"
+  },
+  {
+    "product": "WPSocialNinja",
+    "slug": "wpsocialninja",
+    "url": "https://docs.wpsocialninja.com/"
+  },
+  {
+    "product": "AzonPress",
+    "slug": "azonpress",
+    "url": "https://docs.azonpress.com/"
+  },
+  {
+    "product": "Ninja Tables",
+    "slug": "ninja-tables",
+    "url": "https://ninjatables.com/docs/"
+  }
+]

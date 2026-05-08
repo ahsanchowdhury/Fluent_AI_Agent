@@ -21,6 +21,7 @@
     "form:test": "node scripts/form-test.js",
     "index:code": "node scripts/index-code.js",
     "index:sync": "node scripts/index-sync.js",
+    "index:doc-links": "node scripts/index-doc-links.js",
     "index:status": "node scripts/index-status.js",
     "debug": "node scripts/debug.js",
     "chat": "node scripts/chat.js",

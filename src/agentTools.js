@@ -132,6 +132,33 @@ export const agentTools = [
   },
   {
     type: "function",
+    name: "search_doc_links",
+    description:
+      "Search the trusted official documentation link index under docs/doc-links. Use this whenever a support answer should include a documentation link.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        product: {
+          type: "string",
+          description:
+            "Product name or slug, for example 'FluentCart', 'Fluent Forms', 'Fluent Support', or empty to search all products.",
+        },
+        query: {
+          type: "string",
+          description: "Customer issue or doc topic, for example 'bulk product import price categories'.",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum number of matching documentation links to return. Defaults to 5.",
+        },
+      },
+      required: ["product", "query", "maxResults"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "read_doc",
     description:
       "Read one local company doc or saved reply file. Paths must be relative to the docs root.",
@@ -310,6 +337,17 @@ export async function runAgentTool(config, toolCall) {
       );
     }
 
+    if (toolCall.name === "search_doc_links") {
+      return toolResult(
+        true,
+        searchTrustedDocLinks(config, {
+          product: args.product || "",
+          query: args.query || "",
+          maxResults: args.maxResults || 5,
+        })
+      );
+    }
+
     if (toolCall.name === "read_doc") {
       const file = readTextFile(config.docsRoot, args.path);
       return toolResult(true, file);
@@ -353,4 +391,88 @@ function toolResult(ok, value) {
   }
 
   return `${payload.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n...TRUNCATED...`;
+}
+
+export function searchTrustedDocLinks(config, { product = "", query = "", maxResults = 5 }) {
+  const productFilter = normalizeWords(product);
+  const queryWords = normalizeWords(`${product} ${query}`);
+  const files = listFiles(config.docsRoot, {
+    path: "doc-links",
+    maxFiles: 100,
+  }).filter((file) => file.endsWith(".md") && file !== "doc-links/index.md");
+  const matches = [];
+
+  for (const file of files) {
+    let content;
+    try {
+      content = readTextFile(config.docsRoot, file).content;
+    } catch (_error) {
+      continue;
+    }
+
+    const productName = content.match(/^Product:\s*(.+)$/m)?.[1]?.trim() || file.replace(/^doc-links\/|\.md$/g, "");
+    const productWords = normalizeWords(productName);
+    const fileWords = normalizeWords(file);
+    const productMentionBoost = !productFilter.length && hasOverlap(queryWords, [...productWords, ...fileWords]) ? 8 : 0;
+
+    if (productFilter.length && !hasOverlap(productFilter, [...productWords, ...fileWords])) {
+      continue;
+    }
+
+    for (const section of content.split(/\n## /).slice(1)) {
+      const title = section.split(/\r?\n/)[0]?.replace(/^#+\s*/, "").trim();
+      const url = section.match(/^URL:\s*(.+)$/m)?.[1]?.trim();
+      const description = section.match(/^Description:\s*(.+)$/m)?.[1]?.trim() || "";
+      const keywords = section.match(/^Keywords:\s*(.+)$/m)?.[1]?.trim() || "";
+
+      if (!title || !url) {
+        continue;
+      }
+
+      const haystackWords = normalizeWords(`${productName} ${title} ${description} ${keywords} ${url}`);
+      const score = scoreWords(queryWords, haystackWords) + (productFilter.length ? 4 : productMentionBoost);
+
+      if (score <= 0) {
+        continue;
+      }
+
+      matches.push({
+        product: productName,
+        title,
+        url,
+        description,
+        score,
+        sourcePath: file,
+      });
+    }
+  }
+
+  return {
+    query,
+    product,
+    count: matches.length,
+    results: matches
+      .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+      .slice(0, maxResults),
+  };
+}
+
+function normalizeWords(text) {
+  return String(text || "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2)
+    .filter((word) => !["and", "the", "for", "with", "docs", "documentation", "fluent"].includes(word));
+}
+
+function hasOverlap(leftWords, rightWords) {
+  const right = new Set(rightWords);
+  return leftWords.some((word) => right.has(word));
+}
+
+function scoreWords(queryWords, haystackWords) {
+  const haystack = new Set(haystackWords);
+  return queryWords.reduce((score, word) => score + (haystack.has(word) ? 1 : 0), 0);
 }

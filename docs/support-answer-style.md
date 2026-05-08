@@ -8,9 +8,10 @@ Use this style for customer-facing support answers.
 
 1. Answer directly first.
 2. Search `docs/golden-answers/` for a matching saved reply before drafting from scratch.
-3. State the verified source briefly when useful.
-4. Give practical steps or a mapping table.
-5. Mention limitations only when they change what the customer should do next.
+3. Search `docs/doc-links/` for the most relevant official documentation link for the same product and issue.
+4. State the verified source briefly when useful.
+5. Give practical steps or a mapping table.
+6. Mention limitations only when they change what the customer should do next.
 
 ## Golden Answers
 
@@ -20,6 +21,15 @@ Use this style for customer-facing support answers.
 - Preserve important links, placeholders such as `{{customer.first_name}}`, policy details, and step order.
 - If multiple golden answers overlap, combine only the relevant parts and avoid repeating the same instruction twice.
 - If no golden answer matches, answer from product docs/code instead.
+
+## Documentation Links
+
+- Include a `Documentation:` line when `docs/doc-links/`, a product doc, or a golden answer contains a clearly relevant official URL.
+- Use only trusted product documentation links or official WPManageNinja account links from the local docs memory.
+- Do not invent documentation URLs.
+- Do not include a documentation link when the best match is weak or unrelated.
+- Prefer one highly relevant link over a long list of loosely related links.
+- If the response is mostly an account/billing saved reply, preserve the dashboard or policy links from the saved reply.
 
 ## Tone
 
