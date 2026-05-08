@@ -19,6 +19,7 @@ const INDEXABLE_EXTENSIONS = new Set([
   ".yaml",
   ".sh",
 ]);
+const DOC_BUNDLE_MAX_BYTES = 180 * 1024;
 
 export function getIndexableFiles(config, options = {}) {
   const rootPath = options.path || ".";
@@ -188,8 +189,43 @@ export async function createCodeVectorStore(client, config, options = {}) {
   });
 
   const uploadables = [];
+  const uploadDocuments = buildUploadDocuments(files);
+  for (const document of uploadDocuments) {
+    uploadables.push(
+      await toFile(Buffer.from(document.content, "utf8"), safeUploadName(document.name), {
+        type: document.mimeType,
+      })
+    );
+  }
 
-  for (const fileEntry of files) {
+  const batches = [];
+  const uploadBatchSize = options.uploadBatchSize || 500;
+  for (let index = 0; index < uploadables.length; index += uploadBatchSize) {
+    const batchFiles = uploadables.slice(index, index + uploadBatchSize);
+    batches.push(
+      await client.vectorStores.fileBatches.uploadAndPoll(
+        vectorStore.id,
+        { files: batchFiles },
+        { maxConcurrency: options.maxConcurrency || 3 }
+      )
+    );
+  }
+
+  const readyStore = await client.vectorStores.retrieve(vectorStore.id);
+
+  return {
+    vectorStore: readyStore,
+    batch: batches.at(-1) || null,
+    batches,
+    files,
+  };
+}
+
+function buildUploadDocuments(fileEntries) {
+  const documents = [];
+  const docGroups = new Map();
+
+  for (const fileEntry of fileEntries) {
     let file;
     try {
       file = readTextFile(fileEntry.root, fileEntry.path);
@@ -197,34 +233,67 @@ export async function createCodeVectorStore(client, config, options = {}) {
       continue;
     }
 
-    const content = [
+    const section = [
       `Source: ${fileEntry.source}`,
       `Relative path: ${fileEntry.displayPath}`,
       `Bytes: ${file.bytes}`,
       "",
       file.content,
+      "",
     ].join("\n");
 
-    uploadables.push(
-      await toFile(Buffer.from(content, "utf8"), safeUploadName(fileEntry.displayPath), {
-        type: mimeTypeForPath(fileEntry.displayPath),
-      })
-    );
+    if (fileEntry.source !== "docs") {
+      documents.push({
+        name: fileEntry.displayPath,
+        mimeType: mimeTypeForPath(fileEntry.displayPath),
+        content: section,
+      });
+      continue;
+    }
+
+    const groupName = docBundleGroupName(fileEntry.displayPath);
+    if (!docGroups.has(groupName)) {
+      docGroups.set(groupName, []);
+    }
+    docGroups.get(groupName).push({
+      path: fileEntry.displayPath,
+      section,
+    });
   }
 
-  const batch = await client.vectorStores.fileBatches.uploadAndPoll(
-    vectorStore.id,
-    { files: uploadables },
-    { maxConcurrency: options.maxConcurrency || 3 }
-  );
+  for (const [groupName, sections] of docGroups) {
+    let part = 1;
+    let content = [`Documentation bundle: ${groupName}`, ""].join("\n");
 
-  const readyStore = await client.vectorStores.retrieve(vectorStore.id);
+    for (const item of sections) {
+      if (Buffer.byteLength(content) + Buffer.byteLength(item.section) > DOC_BUNDLE_MAX_BYTES && content.trim()) {
+        documents.push({
+          name: `docs/${groupName}-part-${part}.md`,
+          mimeType: "text/markdown",
+          content,
+        });
+        part += 1;
+        content = [`Documentation bundle: ${groupName}`, ""].join("\n");
+      }
 
-  return {
-    vectorStore: readyStore,
-    batch,
-    files,
-  };
+      content += [
+        `---`,
+        `Document path: ${item.path}`,
+        "",
+        item.section,
+      ].join("\n");
+    }
+
+    if (content.trim()) {
+      documents.push({
+        name: `docs/${groupName}-part-${part}.md`,
+        mimeType: "text/markdown",
+        content,
+      });
+    }
+  }
+
+  return documents;
 }
 
 export async function syncCodeVectorStore(client, config, options = {}) {
@@ -294,6 +363,19 @@ function mimeTypeForPath(filePath) {
 
 function shouldIncludeDocs(rootPath) {
   return rootPath === "." || rootPath === "" || rootPath === "docs";
+}
+
+function docBundleGroupName(displayPath) {
+  const parts = displayPath.split("/");
+  if (parts[0] === "docs" && parts[1] === "wpmanageninja-all-docs" && parts[2]) {
+    return parts[2].replace(/[^a-zA-Z0-9._-]+/g, "-");
+  }
+
+  if (parts[0] === "docs" && parts[1]) {
+    return parts[1].replace(/[^a-zA-Z0-9._-]+/g, "-");
+  }
+
+  return "company-docs";
 }
 
 function upsertEnvValue(envPath, key, value) {

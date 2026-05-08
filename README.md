@@ -201,7 +201,7 @@ npm run index:sync -- --yes
 
 The agent checks indexed docs first for support answers, then plugin code and local site facts.
 
-By default, sync can include up to 500 docs plus the plugin-code file limit. You can raise this in `.env`:
+By default, sync can include up to 2500 docs plus the plugin-code file limit. You can change this in `.env`:
 
 ```env
 INDEX_MAX_DOCS=1000
