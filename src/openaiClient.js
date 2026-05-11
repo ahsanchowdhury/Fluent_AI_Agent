@@ -48,6 +48,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       "For mixed product + account questions, use product documentation/code for the product question and use golden-answer saved replies for account/policy questions. Example: a Fluent Forms Stripe feature question must be checked against Fluent Forms docs/code, while a non-profit discount question must use the WPManageNinja non-profit saved reply.",
       "For account/policy questions about non-profit/not-for-profit discounts, refunds, trials, renewals, invoices, billing address, licenses, upgrades, downgrades, password reset, or payment method updates, search_docs in 'golden-answers' first and adapt the matching saved reply. These questions are company policy questions, not product feature questions.",
       "When deterministic support hints say a golden-answer saved reply matched, you must use that saved reply. Do not say the information was not found in product docs, because product docs are not the source for company policy answers.",
+      "For trial/demo/try-before-buying questions, use the refund/trial saved reply. Do not only explain installation steps or say the customer must purchase without mentioning the 14-day refund policy.",
       "When deterministic support hints include product-specific code evidence, use that product evidence directly. Do not cite or recommend another product for that same answer unless the primary product evidence says the feature is unavailable.",
       "If deterministic support hints include Fluent Forms Stripe code evidence, answer as Fluent Forms evidence. Do not say the feature is Paymattic-only, do not cite Paymattic as the source, and ignore conflicting vector-memory results from other products for that Fluent Forms answer.",
       "Do not hardcode Fluent Support as the primary plugin. Fluent Support is only one example. The primary plugin might be FluentCRM, Bit File Manager, Live Chat for Fluent Support, My Shop Loyalty System, Plugin Check, WP Debug Hub, or any other installed plugin.",
@@ -216,6 +217,20 @@ function buildDeterministicSupportHints(config, input, activity) {
     ].join("\n"));
   }
 
+  if (/\b(try|trial|demo|test|evaluate|before\s+buying|before\s+purchase|money[\s-]?back|refund)\b/i.test(text) && /\b(pro|plugin|product|license|ninja\s*tables?|fluent|wpmanageninja)\b/i.test(text)) {
+    emitActivity(activity, "docs", "Matched refund and trial-period saved reply");
+    hints.push([
+      "Matched golden-answer saved reply for refund policy and trial period:",
+      "Source: docs/golden-answers/wpmanageninja-account-billing-saved-replies.md",
+      "Use this when a customer asks whether they can try, test, demo, evaluate, or use a Pro product before buying:",
+      "Hello {{customer.first_name}},",
+      "We do not have a trial period, but we do have a 14-day refund policy. You can try our product, and if it does not meet your needs, you can request a refund.",
+      "You may read our Privacy Policy here: https://wpmanageninja.com/privacy/",
+      "Thank you",
+      "Answer implication: Keep the reply focused on no trial period + 14-day refund policy. Mention the specific product only naturally; do not turn this into installation instructions unless the customer asks how to install.",
+    ].join("\n"));
+  }
+
   if (/fluent\s*forms?/i.test(text) && /stripe/i.test(text) && /\b(two|multiple|different|separate|donation|donations|purchase|purchases|accounts?)\b/i.test(text)) {
     emitActivity(activity, "files", "Matched Fluent Forms Stripe account code evidence");
     hints.push([
@@ -241,6 +256,10 @@ function buildDeterministicSupportHints(config, input, activity) {
 }
 
 function sanitizeAgentText(text, input) {
+  if (isTrialRefundPolicyQuestion(input)) {
+    return buildTrialRefundSavedReply(input);
+  }
+
   let value = String(text || "").replace(/【[^】]+】/g, "").trim();
   const askedFluentForms = /fluent\s*forms?/i.test(String(input || ""));
   const askedPaymattic = /paymattic/i.test(String(input || ""));
@@ -255,6 +274,39 @@ function sanitizeAgentText(text, input) {
   }
 
   return value;
+}
+
+function isTrialRefundPolicyQuestion(input) {
+  const text = String(input || "");
+  return /\b(try|trial|demo|test|evaluate|before\s+buying|before\s+purchase|money[\s-]?back|refund)\b/i.test(text) &&
+    /\b(pro|plugin|product|license|ninja\s*tables?|fluent|wpmanageninja)\b/i.test(text);
+}
+
+function buildTrialRefundSavedReply(input) {
+  const product = extractProductName(input) || "our product";
+  return [
+    "Hello,",
+    "",
+    `We do not have a trial period, but we do have a 14-day refund policy. You can try ${product}, and if it does not meet your needs, you can request a refund.`,
+    "",
+    "You may read our Privacy Policy here:",
+    "https://wpmanageninja.com/privacy/",
+    "",
+    "Thank you",
+  ].join("\n");
+}
+
+function extractProductName(input) {
+  const text = String(input || "");
+  if (/ninja\s*tables?\s*pro/i.test(text)) return "Ninja Tables Pro";
+  if (/ninja\s*tables?/i.test(text)) return "Ninja Tables";
+  if (/fluent\s*forms?\s*pro/i.test(text)) return "Fluent Forms Pro";
+  if (/fluent\s*forms?/i.test(text)) return "Fluent Forms";
+  if (/fluent\s*crm/i.test(text)) return "FluentCRM";
+  if (/fluent\s*support/i.test(text)) return "Fluent Support";
+  if (/fluent\s*cart/i.test(text)) return "FluentCart";
+  if (/fluent\s*booking/i.test(text)) return "FluentBooking";
+  return "";
 }
 
 function buildUserInput(input, images = []) {
