@@ -409,7 +409,7 @@ export async function runAgentTool(config, toolCall) {
         path: args.path || "",
         instructions: args.instructions || "",
       });
-      return toolResult(true, addDebugImageUrlsToInteractiveResult(result));
+      return toolResult(true, compactInteractiveResult(addDebugImageUrlsToInteractiveResult(result)));
     }
 
     return toolResult(false, `Unknown tool: ${toolCall.name}`);
@@ -455,7 +455,90 @@ function addDebugImageUrlsToInteractiveResult(result) {
         screenshotMarkdown: screenshotUrl ? `[Open step ${step.step} screenshot](${screenshotUrl})` : "",
       };
     }),
+    behaviorTests: (result.behaviorTests || []).map((test) => {
+      const beforeScreenshotUrl = absoluteLocalImageUrl(test.beforeScreenshotPath || "");
+      const afterScreenshotUrl = absoluteLocalImageUrl(test.afterScreenshotPath || "");
+      return {
+        ...test,
+        beforeScreenshotUrl,
+        afterScreenshotUrl,
+        beforeScreenshotMarkdown: beforeScreenshotUrl ? `[Open ${test.name} before screenshot](${beforeScreenshotUrl})` : "",
+        afterScreenshotMarkdown: afterScreenshotUrl ? `[Open ${test.name} after screenshot](${afterScreenshotUrl})` : "",
+      };
+    }),
   };
+}
+
+function compactInteractiveResult(result) {
+  return {
+    requestedUrl: result.requestedUrl,
+    finalUrl: result.finalUrl,
+    status: result.status,
+    title: result.title,
+    navigationError: result.navigationError,
+    instructions: result.instructions,
+    targetSteps: result.targetSteps,
+    actions: result.actions,
+    safetyNote: result.safetyNote,
+    behaviorDiagnosis: result.behaviorDiagnosis,
+    behaviorTests: (result.behaviorTests || []).map((test) => ({
+      name: test.name,
+      label: test.label,
+      targetStep: test.targetStep,
+      ok: test.ok,
+      reason: test.reason || "",
+      outcome: test.outcome || null,
+      beforeStep: test.activeBefore?.number || null,
+      beforeText: test.activeBefore?.text || "",
+      afterStep: test.activeAfter?.number || null,
+      afterText: test.activeAfter?.text || "",
+      modalBeforeVisible: test.modalBefore?.visible ?? null,
+      modalAfterVisible: test.modalAfter?.visible ?? null,
+      beforeScreenshotMarkdown: test.beforeScreenshotMarkdown || "",
+      afterScreenshotMarkdown: test.afterScreenshotMarkdown || "",
+      consoleErrors: (test.consoleMessages || []).filter((message) => message.type === "error").slice(0, 5),
+      pageErrors: (test.pageErrors || []).slice(0, 5),
+      badResponses: (test.badResponses || []).slice(0, 8),
+    })),
+    stepInspections: (result.stepInspections || []).map((step) => ({
+      step: step.step,
+      plugin: step.plugin,
+      formClass: step.formClass,
+      activeClassName: step.activeClassName,
+      text: step.text,
+      viewport: step.viewport,
+      formRect: step.formRect,
+      overflowsViewport: step.overflowsViewport,
+      screenshotMarkdown: step.screenshotMarkdown || "",
+      keySelectors: {
+        containers: compactElementSamples(step.elements?.containers),
+        questionText: compactElementSamples(step.elements?.questionText),
+        choices: compactElementSamples(step.elements?.choices, 12),
+        inputs: compactElementSamples(step.elements?.inputs, 8),
+      },
+    })),
+    suggestedCss: result.suggestedCss,
+    screenshots: {
+      before: result.beforeScreenshotMarkdown || result.beforeScreenshotUrl || "",
+      after: result.afterScreenshotMarkdown || result.afterScreenshotUrl || "",
+    },
+    submitRequests: (result.submitRequests || []).slice(0, 8),
+    consoleErrors: (result.consoleMessages || []).filter((message) => message.type === "error").slice(0, 8),
+    pageErrors: (result.pageErrors || []).slice(0, 8),
+    requestFailures: (result.requestFailures || []).slice(0, 8),
+    badResponses: (result.badResponses || []).slice(0, 12),
+    bodyTextPreview: result.bodyTextPreview,
+  };
+}
+
+function compactElementSamples(items = [], limit = 6) {
+  return items.slice(0, limit).map((item) => ({
+    tag: item.tag,
+    className: item.className,
+    text: item.text,
+    rect: item.rect,
+    style: item.style,
+  }));
 }
 
 function absoluteLocalImageUrl(filePath) {

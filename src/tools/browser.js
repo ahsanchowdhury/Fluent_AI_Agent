@@ -305,6 +305,15 @@ export async function inspectInteractivePage(config, options = {}) {
     targetSteps,
     actions,
   });
+  const behaviorTests = shouldRunInteractionBehaviorTests(instructions)
+    ? await runConversationalBehaviorTests(url, {
+        screenshotDir,
+        instructions,
+        targetSteps,
+        width: options.width || 1440,
+        height: options.height || 1000,
+      })
+    : [];
 
   const afterScreenshotPath = path.join(screenshotDir, `${Date.now()}-interactive-after.png`);
   await page.screenshot({ path: afterScreenshotPath, fullPage: true }).catch(() => null);
@@ -323,6 +332,8 @@ export async function inspectInteractivePage(config, options = {}) {
     targetSteps,
     actions,
     stepInspections,
+    behaviorTests,
+    behaviorDiagnosis: diagnoseBehaviorTests(behaviorTests),
     suggestedCss: buildInteractiveCssSuggestion(stepInspections),
     safetyNote: "Stopped before final submit unless the requested target step required inspection only.",
     beforeScreenshotPath,
@@ -625,6 +636,311 @@ function buildInteractiveCssSuggestion(stepInspections) {
     "  }",
     "}",
   ].join("\n");
+}
+
+function shouldRunInteractionBehaviorTests(instructions) {
+  return /\b(enter|keyboard|keypress|key press|close|closes|closed|not\s+advance|not\s+going|instead|button|next|skip|popup|modal|step)\b/i.test(
+    String(instructions || "")
+  );
+}
+
+async function runConversationalBehaviorTests(url, options = {}) {
+  const targetStep = options.targetSteps?.[0] || extractTargetSteps(options.instructions)[0] || 3;
+  const cases = [
+    {
+      name: "keyboard_enter_without_selection",
+      label: "Press keyboard Enter on the target step without selecting an option",
+      run: async (page, active) => {
+        await page.keyboard.press("Enter");
+      },
+    },
+    {
+      name: "click_action_button_without_selection",
+      label: "Click the visible action button on the target step without selecting an option",
+      run: async (_page, active) => {
+        await active.locator(".o-btn-action").click({ timeout: 5000 });
+      },
+    },
+    {
+      name: "click_enter_helper_without_selection",
+      label: "Click the visible Press Enter helper on the target step without selecting an option",
+      run: async (_page, active) => {
+        await active.locator(".f-enter-desc").click({ timeout: 5000 });
+      },
+    },
+    {
+      name: "select_first_option_then_keyboard_enter",
+      label: "Select the first option on the target step, then press keyboard Enter",
+      run: async (page, active) => {
+        await active.locator("li").first().click({ timeout: 5000 });
+        await page.waitForTimeout(500);
+        await page.keyboard.press("Enter");
+      },
+    },
+  ];
+  const results = [];
+
+  for (const testCase of cases) {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage({
+      viewport: {
+        width: options.width || 1440,
+        height: options.height || 1000,
+      },
+    });
+    const consoleMessages = [];
+    const pageErrors = [];
+    const requestFailures = [];
+    const badResponses = [];
+    const actions = [];
+
+    page.on("console", (message) => {
+      consoleMessages.push({
+        type: message.type(),
+        text: message.text(),
+        location: message.location(),
+      });
+      trim(consoleMessages);
+    });
+    page.on("pageerror", (error) => {
+      pageErrors.push(error.message);
+      trim(pageErrors);
+    });
+    page.on("requestfailed", (request) => {
+      requestFailures.push({
+        url: request.url(),
+        method: request.method(),
+        failure: request.failure()?.errorText || "Unknown failure",
+      });
+      trim(requestFailures);
+    });
+    page.on("response", (response) => {
+      const status = response.status();
+      if (status >= 400) {
+        badResponses.push({
+          url: response.url(),
+          status,
+          statusText: response.statusText(),
+        });
+        trim(badResponses);
+      }
+    });
+
+    try {
+      await prepareConversationalFormAtStep(page, url, {
+        instructions: options.instructions,
+        targetStep,
+        actions,
+      });
+      const modalBefore = await getVisibleModalState(page);
+      const activeBefore = await getActiveConversationalStep(page);
+      const beforeScreenshotPath = path.join(options.screenshotDir, `${Date.now()}-${testCase.name}-before.png`);
+      await page.screenshot({ path: beforeScreenshotPath, fullPage: true }).catch(() => null);
+
+      if (!activeBefore || activeBefore.number !== targetStep) {
+        results.push({
+          name: testCase.name,
+          label: testCase.label,
+          targetStep,
+          ok: false,
+          reason: `Could not reach target step ${targetStep}.`,
+          setupActions: actions,
+          modalBefore,
+          activeBefore,
+          beforeScreenshotPath,
+          consoleMessages,
+          pageErrors,
+          requestFailures,
+          badResponses,
+        });
+        await browser.close();
+        continue;
+      }
+
+      const active = page.locator(".q-form:not(.q-is-inactive)").first();
+      await testCase.run(page, active);
+      await page.waitForTimeout(2000);
+
+      const modalAfter = await getVisibleModalState(page);
+      const activeAfter = await getActiveConversationalStep(page);
+      const afterScreenshotPath = path.join(options.screenshotDir, `${Date.now()}-${testCase.name}-after.png`);
+      await page.screenshot({ path: afterScreenshotPath, fullPage: true }).catch(() => null);
+
+      results.push({
+        name: testCase.name,
+        label: testCase.label,
+        targetStep,
+        ok: true,
+        outcome: classifyBehaviorOutcome({ modalBefore, modalAfter, activeBefore, activeAfter }),
+        setupActions: actions,
+        modalBefore,
+        activeBefore,
+        modalAfter,
+        activeAfter,
+        beforeScreenshotPath,
+        afterScreenshotPath,
+        consoleMessages,
+        pageErrors,
+        requestFailures,
+        badResponses,
+      });
+    } catch (error) {
+      results.push({
+        name: testCase.name,
+        label: testCase.label,
+        targetStep,
+        ok: false,
+        reason: error.message,
+        setupActions: actions,
+        consoleMessages,
+        pageErrors,
+        requestFailures,
+        badResponses,
+      });
+    } finally {
+      await browser.close().catch(() => null);
+    }
+  }
+
+  return results;
+}
+
+async function prepareConversationalFormAtStep(page, url, { instructions, targetStep, actions }) {
+  await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: 45000,
+  });
+  await page.waitForTimeout(3000);
+  await acceptCookieBanner(page, actions);
+  await clickRequestedElement(page, instructions, actions);
+  await page.waitForTimeout(1500);
+
+  for (let guard = 0; guard < 12; guard += 1) {
+    const activeStep = await getActiveConversationalStep(page);
+    if (!activeStep) {
+      throw new Error("No active conversational form step found.");
+    }
+    if (activeStep.number >= targetStep) {
+      return activeStep;
+    }
+    const advanced = await advanceConversationalStep(page, activeStep, actions, `${instructions}\nReach step ${targetStep} for behavior testing.`);
+    if (!advanced) {
+      throw new Error(`Could not advance past step ${activeStep.number}.`);
+    }
+    await page.waitForTimeout(1200);
+  }
+
+  throw new Error(`Could not reach step ${targetStep} within the transition limit.`);
+}
+
+async function getVisibleModalState(page) {
+  return page.evaluate(() => {
+    const candidates = [
+      ...document.querySelectorAll("[role='dialog'], .elementor-popup-modal, .dialog-widget, .modal, [class*='popup'], [class*='modal']"),
+    ];
+    const visible = candidates
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return {
+          tag: element.tagName.toLowerCase(),
+          id: element.id || "",
+          className: String(element.className || ""),
+          text: (element.innerText || "").replace(/\s+/g, " ").trim().slice(0, 200),
+          visible: Boolean(rect.width && rect.height && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || "1") > 0),
+          rect: {
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+          },
+        };
+      })
+      .filter((item) => item.visible);
+
+    return {
+      visible: visible.length > 0,
+      count: visible.length,
+      items: visible.slice(0, 8),
+    };
+  });
+}
+
+function classifyBehaviorOutcome({ modalBefore, modalAfter, activeBefore, activeAfter }) {
+  if (modalBefore?.visible && !modalAfter?.visible) {
+    return {
+      type: "modal_closed",
+      severity: "bug",
+      summary: "The modal/popup closed after this interaction.",
+    };
+  }
+
+  if (activeBefore?.number && activeAfter?.number && activeAfter.number > activeBefore.number) {
+    return {
+      type: "advanced",
+      severity: "ok",
+      summary: `The form advanced from step ${activeBefore.number} to step ${activeAfter.number}.`,
+    };
+  }
+
+  if (activeBefore?.number && activeAfter?.number === activeBefore.number) {
+    return {
+      type: "stayed",
+      severity: "warning",
+      summary: `The form stayed on step ${activeBefore.number}.`,
+    };
+  }
+
+  return {
+    type: "unknown",
+    severity: "warning",
+    summary: "The outcome could not be classified from the active step/modal state.",
+  };
+}
+
+function diagnoseBehaviorTests(behaviorTests) {
+  if (!behaviorTests.length) {
+    return null;
+  }
+
+  const modalClosed = behaviorTests.filter((test) => test.outcome?.type === "modal_closed");
+  const advanced = behaviorTests.filter((test) => test.outcome?.type === "advanced");
+
+  if (modalClosed.length) {
+    return {
+      likelyCause:
+        "At least one interaction caused the modal/popup to close instead of advancing. This usually means the keyboard/click event is escaping the form step and being handled by the popup/lightbox layer.",
+      confidence: "high",
+      failingInteractions: modalClosed.map((test) => ({
+        name: test.name,
+        label: test.label,
+        targetStep: test.targetStep,
+        beforeStep: test.activeBefore?.number || null,
+        afterStep: test.activeAfter?.number || null,
+      })),
+      workingInteractions: advanced.map((test) => ({
+        name: test.name,
+        label: test.label,
+        targetStep: test.targetStep,
+        beforeStep: test.activeBefore?.number || null,
+        afterStep: test.activeAfter?.number || null,
+      })),
+      suggestedFix:
+        "Intercept Enter keydown events inside the active conversational form step, handle the intended form navigation there, and stop propagation so the popup/lightbox does not receive the event.",
+    };
+  }
+
+  return {
+    likelyCause: "No modal-closing interaction was reproduced in the tested behavior paths.",
+    confidence: "medium",
+    workingInteractions: advanced.map((test) => ({
+      name: test.name,
+      label: test.label,
+      targetStep: test.targetStep,
+      beforeStep: test.activeBefore?.number || null,
+      afterStep: test.activeAfter?.number || null,
+    })),
+  };
 }
 
 async function inspectForms(page) {
