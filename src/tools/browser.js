@@ -1254,16 +1254,29 @@ function escapeRegExp(value) {
 }
 
 function buildUrl(baseUrl, target) {
-  if (!target) {
+  const cleanTarget = extractBrowserTarget(target);
+
+  if (!cleanTarget) {
     return baseUrl;
   }
 
-  if (/^https?:\/\//i.test(target)) {
-    return target;
+  if (/^https?:\/\//i.test(cleanTarget)) {
+    return cleanTarget;
   }
 
-  const relativeTarget = target.replace(/^\/+/, "");
+  const relativeTarget = cleanTarget.replace(/^\/+/, "");
   return new URL(relativeTarget, ensureTrailingSlash(baseUrl)).toString();
+}
+
+function extractBrowserTarget(target) {
+  const value = String(target || "").trim();
+  const urlMatch = value.match(/https?:\/\/[^\s<>"')\]]+/i);
+
+  if (urlMatch?.[0]) {
+    return urlMatch[0].replace(/[.,;:!?]+$/, "");
+  }
+
+  return value.split(/\s+/)[0] || "";
 }
 
 function ensureTrailingSlash(value) {
