@@ -108,10 +108,17 @@ textarea {
   place-items: center;
   width: 42px;
   height: 42px;
-  border-radius: 10px;
-  background: var(--accent);
-  color: white;
-  font-weight: 800;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  border-radius: 12px;
+  background: #0c1118;
+  box-shadow: 0 10px 22px rgba(15, 108, 189, 0.22);
+  overflow: hidden;
+}
+
+.brand-mark img {
+  display: block;
+  width: 42px;
+  height: 42px;
 }
 
 h1,

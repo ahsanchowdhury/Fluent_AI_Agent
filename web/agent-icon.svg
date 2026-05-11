@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">WP Agent icon</title>
+  <desc id="desc">A modern chat and automation mark for the local WordPress AI agent.</desc>
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="54" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4EA1F3"/>
+      <stop offset="1" stop-color="#0F6CBD"/>
+    </linearGradient>
+    <linearGradient id="spark" x1="34" y1="16" x2="52" y2="36" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#D7ECFF"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="#0C1118"/>
+  <path fill="url(#bg)" d="M13 15.5C13 11.9 15.9 9 19.5 9h25C48.1 9 51 11.9 51 15.5v21C51 40.1 48.1 43 44.5 43H30.2L18.8 53.5c-1.5 1.4-3.8.3-3.8-1.7V43.3A6.5 6.5 0 0 1 13 36.5v-21Z"/>
+  <path fill="#fff" d="M23.4 29.5c0-1 .8-1.8 1.8-1.8h13.6a1.8 1.8 0 1 1 0 3.6H25.2c-1 0-1.8-.8-1.8-1.8Zm0 7.2c0-1 .8-1.8 1.8-1.8h8.9a1.8 1.8 0 1 1 0 3.6h-8.9c-1 0-1.8-.8-1.8-1.8Z"/>
+  <path fill="url(#spark)" d="M42.5 15.8 44.3 21l5.2 1.8-5.2 1.8-1.8 5.2-1.8-5.2-5.2-1.8 5.2-1.8 1.8-5.2Z"/>
+</svg>
