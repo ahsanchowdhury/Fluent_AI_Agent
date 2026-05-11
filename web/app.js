@@ -19,8 +19,19 @@ const attachImageButton = document.querySelector("#attachImageButton");
 const imagePreviewList = document.querySelector("#imagePreviewList");
 const lightThemeButton = document.querySelector("#lightThemeButton");
 const darkThemeButton = document.querySelector("#darkThemeButton");
+const openMemoryViewerButton = document.querySelector("#openMemoryViewer");
+const closeMemoryViewerButton = document.querySelector("#closeMemoryViewer");
+const memoryModal = document.querySelector("#memoryModal");
+const memoryStats = document.querySelector("#memoryStats");
+const memorySearchInput = document.querySelector("#memorySearchInput");
+const memorySourceFilter = document.querySelector("#memorySourceFilter");
+const memorySearchButton = document.querySelector("#memorySearchButton");
+const memoryResults = document.querySelector("#memoryResults");
+const memoryPreviewTitle = document.querySelector("#memoryPreviewTitle");
+const memoryPreview = document.querySelector("#memoryPreview");
 let selectedImages = [];
 let activityPoll = null;
+let memoryLoaded = false;
 
 applyTheme(localStorage.getItem(themeStorageKey) || "light");
 
@@ -32,6 +43,18 @@ lightThemeButton.addEventListener("click", () => applyTheme("light"));
 darkThemeButton.addEventListener("click", () => applyTheme("dark"));
 summarizeContextButton.addEventListener("click", () => runComposerAction("summarize_context"));
 rewriteButton.addEventListener("click", () => runComposerAction("rewrite"));
+openMemoryViewerButton.addEventListener("click", openMemoryViewer);
+closeMemoryViewerButton.addEventListener("click", closeMemoryViewer);
+memoryModal.addEventListener("click", (event) => {
+  if (event.target === memoryModal) closeMemoryViewer();
+});
+memorySearchButton.addEventListener("click", searchMemory);
+memorySearchInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    searchMemory();
+  }
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -218,6 +241,125 @@ function addStatus(label, value) {
   row.className = "status-row";
   row.innerHTML = `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd>`;
   statusList.append(row);
+}
+
+async function openMemoryViewer() {
+  memoryModal.classList.remove("hidden");
+  if (!memoryLoaded) {
+    await loadMemorySummary();
+    memoryLoaded = true;
+  }
+  memorySearchInput.focus();
+}
+
+function closeMemoryViewer() {
+  memoryModal.classList.add("hidden");
+}
+
+async function loadMemorySummary() {
+  memoryStats.innerHTML = "";
+  memoryResults.innerHTML = "";
+  memoryPreview.textContent = "Select a file to preview its local source content.";
+  memoryPreviewTitle.textContent = "File Preview";
+
+  try {
+    const summary = await fetchJson("/api/memory/summary");
+    renderMemoryStats(summary);
+    renderMemoryResults(summary.files || []);
+  } catch (error) {
+    memoryStats.innerHTML = `<div class="memory-error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderMemoryStats(summary) {
+  if (!summary.exists) {
+    memoryStats.innerHTML = `<div class="memory-error">${escapeHtml(summary.message || "No local memory found.")}</div>`;
+    return;
+  }
+
+  const stats = [
+    ["Vector Store", summary.vectorStoreId || "not set"],
+    ["Status", summary.vectorStoreStatus || "unknown"],
+    ["Indexed", summary.indexedAt ? new Date(summary.indexedAt).toLocaleString() : "unknown"],
+    ["Files", String(summary.fileCount || 0)],
+    ["Docs", String(summary.bySource?.docs || 0)],
+    ["Plugin files", String(summary.bySource?.plugin || 0)],
+    ["Size", formatBytes(summary.totalBytes || 0)],
+  ];
+
+  memoryStats.innerHTML = stats.map(([label, value]) => `
+    <div class="memory-stat">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `).join("");
+}
+
+async function searchMemory() {
+  const params = new URLSearchParams({
+    q: memorySearchInput.value.trim(),
+    source: memorySourceFilter.value,
+  });
+
+  memoryResults.innerHTML = `<li class="memory-empty">Searching...</li>`;
+  try {
+    const result = await fetchJson(`/api/memory/search?${params.toString()}`);
+    renderMemoryResults(result.results || []);
+    if (!result.results?.length) {
+      memoryResults.innerHTML = `<li class="memory-empty">No local memory files matched.</li>`;
+    }
+  } catch (error) {
+    memoryResults.innerHTML = `<li class="memory-empty">Search failed: ${escapeHtml(error.message)}</li>`;
+  }
+}
+
+function renderMemoryResults(files) {
+  memoryResults.innerHTML = "";
+  if (!files.length) {
+    memoryResults.innerHTML = `<li class="memory-empty">No indexed files found.</li>`;
+    return;
+  }
+
+  for (const file of files) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.className = "memory-result";
+    button.type = "button";
+    button.addEventListener("click", () => previewMemoryFile(file));
+
+    const title = document.createElement("span");
+    title.className = "memory-result-path";
+    title.textContent = file.path;
+    const meta = document.createElement("span");
+    meta.className = "memory-result-meta";
+    const match = file.line ? ` · line ${file.line}` : "";
+    meta.textContent = `${file.source || "unknown"} · ${formatBytes(file.bytes || 0)}${match}`;
+    button.append(title, meta);
+
+    if (file.excerpt) {
+      const excerpt = document.createElement("span");
+      excerpt.className = "memory-result-excerpt";
+      excerpt.textContent = file.excerpt;
+      button.append(excerpt);
+    }
+
+    item.append(button);
+    memoryResults.append(item);
+  }
+}
+
+async function previewMemoryFile(file) {
+  memoryPreviewTitle.textContent = file.path;
+  memoryPreview.textContent = "Loading file...";
+
+  try {
+    const params = new URLSearchParams({ path: file.path, source: file.source });
+    const result = await fetchJson(`/api/memory/file?${params.toString()}`);
+    memoryPreviewTitle.textContent = `${result.path} · ${result.source} · ${formatBytes(result.bytes || 0)}`;
+    memoryPreview.textContent = `${result.truncated ? "[Preview truncated]\n\n" : ""}${result.content || ""}`;
+  } catch (error) {
+    memoryPreview.textContent = `Could not preview file: ${error.message}`;
+  }
 }
 
 function addMessage(role, text, images = []) {
@@ -944,4 +1086,11 @@ function formatRelative(value) {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }

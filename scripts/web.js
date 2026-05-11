@@ -1,4 +1,5 @@
 import express from "express";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { maybeAutoIndex } from "../src/autoIndex.js";
@@ -110,6 +111,34 @@ app.get("/api/site-summary", async (_request, response) => {
 
 app.get("/api/chat/activity/:requestId", (request, response) => {
   response.json(activityStore.get(String(request.params.requestId || "")));
+});
+
+app.get("/api/memory/summary", (_request, response) => {
+  try {
+    response.json(getLocalMemorySummary(config));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/memory/search", (request, response) => {
+  try {
+    const query = String(request.query?.q || "").trim();
+    const source = String(request.query?.source || "all").trim();
+    response.json(searchLocalMemory(config, { query, source }));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.get("/api/memory/file", (request, response) => {
+  try {
+    const filePath = String(request.query?.path || "").trim();
+    const source = String(request.query?.source || "").trim();
+    response.json(readLocalMemoryFile(config, { path: filePath, source }));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
 });
 
 app.get("/api/themes", async (_request, response) => {
@@ -337,4 +366,175 @@ function buildMessageActionPrompt(action, { text, history }) {
       createdAt: message.createdAt,
     })), null, 2),
   ].join("\n");
+}
+
+function getManifestPath() {
+  return path.resolve(process.cwd(), "memory", "index-manifest.json");
+}
+
+function readLocalManifest() {
+  const manifestPath = getManifestPath();
+  if (!fs.existsSync(manifestPath)) {
+    return null;
+  }
+
+  return JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+}
+
+function getLocalMemorySummary(config) {
+  const manifest = readLocalManifest();
+  if (!manifest) {
+    return {
+      exists: false,
+      vectorStoreId: config.openaiVectorStoreId || "",
+      message: "No local memory manifest found yet.",
+    };
+  }
+
+  const files = Array.isArray(manifest.files) ? manifest.files : [];
+  const bySource = files.reduce((totals, file) => {
+    const source = file.source || "unknown";
+    totals[source] = (totals[source] || 0) + 1;
+    return totals;
+  }, {});
+
+  return {
+    exists: true,
+    vectorStoreId: manifest.vectorStoreId || config.openaiVectorStoreId || "",
+    vectorStoreStatus: manifest.vectorStoreStatus || "",
+    indexedAt: manifest.indexedAt || manifest.createdAt || "",
+    fileCount: manifest.fileCount || files.length,
+    skippedCount: manifest.skippedCount || 0,
+    totalBytes: manifest.totalBytes || 0,
+    pluginRoot: manifest.pluginRoot || config.pluginRoot,
+    docsRoot: manifest.docsRoot || path.resolve(process.cwd(), "docs"),
+    bySource,
+    files: files.slice(0, 120).map(summarizeMemoryFile),
+  };
+}
+
+function searchLocalMemory(config, options = {}) {
+  const manifest = readLocalManifest();
+  if (!manifest) {
+    return { query: options.query || "", count: 0, results: [] };
+  }
+
+  const query = String(options.query || "").trim();
+  const sourceFilter = String(options.source || "all").trim();
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const files = Array.isArray(manifest.files) ? manifest.files : [];
+  const results = [];
+
+  for (const file of files) {
+    if (results.length >= 80) break;
+    if (sourceFilter !== "all" && file.source !== sourceFilter) continue;
+
+    const pathMatch = terms.length
+      ? terms.every((term) => String(file.path || "").toLowerCase().includes(term))
+      : false;
+    let contentMatch = null;
+
+    if (terms.length && !pathMatch) {
+      contentMatch = findFirstMemoryContentMatch(config, file, terms);
+      if (!contentMatch) continue;
+    }
+
+    results.push({
+      ...summarizeMemoryFile(file),
+      line: contentMatch?.line || null,
+      excerpt: contentMatch?.text || "",
+      matchType: pathMatch ? "path" : "content",
+    });
+  }
+
+  return {
+    query,
+    source: sourceFilter,
+    count: results.length,
+    results,
+  };
+}
+
+function readLocalMemoryFile(config, options = {}) {
+  const manifest = readLocalManifest();
+  if (!manifest) {
+    throw new Error("No local memory manifest found.");
+  }
+
+  const targetPath = String(options.path || "").trim();
+  const source = String(options.source || "").trim();
+  if (!targetPath || !source) {
+    throw new Error("Path and source are required.");
+  }
+
+  const file = (manifest.files || []).find((item) => item.path === targetPath && item.source === source);
+  if (!file) {
+    throw new Error("File is not listed in the memory manifest.");
+  }
+
+  const absolutePath = resolveMemorySourcePath(config, file);
+  const stat = fs.statSync(absolutePath);
+  const maxBytes = 220 * 1024;
+  if (stat.size > maxBytes) {
+    return {
+      ...summarizeMemoryFile(file),
+      absolutePath,
+      truncated: true,
+      content: fs.readFileSync(absolutePath, "utf8").slice(0, maxBytes),
+    };
+  }
+
+  return {
+    ...summarizeMemoryFile(file),
+    absolutePath,
+    truncated: false,
+    content: fs.readFileSync(absolutePath, "utf8"),
+  };
+}
+
+function findFirstMemoryContentMatch(config, file, terms) {
+  try {
+    const absolutePath = resolveMemorySourcePath(config, file);
+    const stat = fs.statSync(absolutePath);
+    if (stat.size > 500 * 1024) return null;
+
+    const lines = fs.readFileSync(absolutePath, "utf8").split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const haystack = lines[index].toLowerCase();
+      if (terms.every((term) => haystack.includes(term))) {
+        return {
+          line: index + 1,
+          text: lines[index].trim().slice(0, 260),
+        };
+      }
+    }
+  } catch (_error) {
+    return null;
+  }
+
+  return null;
+}
+
+function resolveMemorySourcePath(config, file) {
+  const sourceRoot = file.source === "docs"
+    ? process.cwd()
+    : config.pluginRoot;
+  const root = path.resolve(sourceRoot);
+  const resolved = path.resolve(root, file.path || "");
+  const relative = path.relative(root, resolved);
+
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Memory file path escapes the allowed root.");
+  }
+
+  return resolved;
+}
+
+function summarizeMemoryFile(file) {
+  return {
+    path: file.path,
+    source: file.source || "unknown",
+    bytes: file.bytes || 0,
+    sha256: file.sha256 || "",
+  };
 }

@@ -41,6 +41,12 @@
           <h2>Status</h2>
           <dl id="statusList"></dl>
         </section>
+
+        <section class="panel">
+          <h2>Memory</h2>
+          <button id="openMemoryViewer" class="secondary" type="button">View Local Memory</button>
+        </section>
+
         <section class="panel plugins">
           <h2>Plugins</h2>
           <ul id="pluginsList"></ul>
@@ -74,6 +80,41 @@
         </form>
       </section>
     </main>
+
+    <div id="memoryModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="memoryModalTitle">
+      <section class="memory-modal">
+        <header class="memory-header">
+          <div>
+            <h2 id="memoryModalTitle">Local Vector Memory</h2>
+            <p>View the local files and manifest that were sent to OpenAI Vector Store.</p>
+          </div>
+          <button id="closeMemoryViewer" class="icon-close" type="button" aria-label="Close memory viewer">×</button>
+        </header>
+
+        <div id="memoryStats" class="memory-stats"></div>
+
+        <div class="memory-controls">
+          <input id="memorySearchInput" type="search" placeholder="Search docs, saved replies, or plugin files..." />
+          <select id="memorySourceFilter" aria-label="Memory source filter">
+            <option value="all">All sources</option>
+            <option value="docs">Docs and saved replies</option>
+            <option value="plugin">Plugin code</option>
+          </select>
+          <button id="memorySearchButton" type="button">Search</button>
+        </div>
+
+        <div class="memory-layout">
+          <div class="memory-results-wrap">
+            <div class="memory-section-title">Indexed Files</div>
+            <ul id="memoryResults" class="memory-results"></ul>
+          </div>
+          <div class="memory-preview-wrap">
+            <div id="memoryPreviewTitle" class="memory-section-title">File Preview</div>
+            <pre id="memoryPreview" class="memory-preview">Select a file to preview its local source content.</pre>
+          </div>
+        </div>
+      </section>
+    </div>
     <script src="/app.js" type="module"></script>
   </body>
 </html>
