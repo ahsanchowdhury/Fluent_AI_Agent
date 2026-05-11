@@ -27,6 +27,7 @@ applyTheme(localStorage.getItem(themeStorageKey) || "light");
 document.querySelector("#resetChat").addEventListener("click", resetChat);
 attachImageButton.addEventListener("click", () => imageInput.click());
 imageInput.addEventListener("change", handleImageSelection);
+input.addEventListener("paste", handleImagePaste);
 lightThemeButton.addEventListener("click", () => applyTheme("light"));
 darkThemeButton.addEventListener("click", () => applyTheme("dark"));
 summarizeContextButton.addEventListener("click", () => runComposerAction("summarize_context"));
@@ -412,10 +413,36 @@ async function runComposerAction(action) {
 }
 
 async function handleImageSelection(event) {
-  const files = [...event.target.files].slice(0, 4 - selectedImages.length);
-  const images = await Promise.all(files.map(readImageFile));
+  await addImageFiles([...event.target.files]);
+}
+
+async function handleImagePaste(event) {
+  const files = [...(event.clipboardData?.files || [])].filter((file) => file.type.startsWith("image/"));
+  if (!files.length) return;
+
+  event.preventDefault();
+  await addImageFiles(files.map((file, index) => renamePastedImage(file, index)));
+}
+
+async function addImageFiles(files) {
+  const slots = 4 - selectedImages.length;
+  if (slots <= 0) {
+    addMessage("system", "You can attach up to 4 images at a time.");
+    return;
+  }
+
+  const images = await Promise.all(files.slice(0, slots).map(readImageFile));
   selectedImages = [...selectedImages, ...images.filter(Boolean)].slice(0, 4);
   renderSelectedImages();
+}
+
+function renamePastedImage(file, index) {
+  const extension = file.type.split("/")[1] || "png";
+  const safeExtension = extension === "jpeg" ? "jpg" : extension;
+  return new File([file], `pasted-image-${Date.now()}-${index + 1}.${safeExtension}`, {
+    type: file.type,
+    lastModified: file.lastModified,
+  });
 }
 
 function readImageFile(file) {
