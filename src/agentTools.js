@@ -13,6 +13,7 @@ import {
   wpCliPluginList,
 } from "./tools/wordpress.js";
 import { debugPage, inspectInteractivePage, testFormPage } from "./tools/browser.js";
+import { listQaRecipes, runQaRecipe } from "./tools/qaRunner.js";
 
 const MAX_TOOL_OUTPUT_CHARS = 70000;
 
@@ -302,6 +303,38 @@ export const agentTools = [
       additionalProperties: false,
     },
   },
+  {
+    type: "function",
+    name: "list_qa_recipes",
+    description:
+      "List available WordPress/plugin QA test recipes that the agent can run in the browser.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "run_qa_recipe",
+    description:
+      "Run a low-risk WordPress/plugin QA recipe in the browser using WP admin credentials. Use this when the user asks to run a plugin QA test, beta test, smoke test, or recipe.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        recipeId: {
+          type: "string",
+          description:
+            "Recipe id from list_qa_recipes, for example 'wordpress/admin-dashboard-smoke'.",
+        },
+      },
+      required: ["recipeId"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export async function runAgentTool(config, toolCall, options = {}) {
@@ -429,6 +462,20 @@ export async function runAgentTool(config, toolCall, options = {}) {
       return toolResult(true, compactInteractiveResult(addDebugImageUrlsToInteractiveResult(result)));
     }
 
+    if (toolCall.name === "list_qa_recipes") {
+      emitActivity(activity, "test", "Listing QA recipes");
+      return toolResult(true, { recipes: listQaRecipes() });
+    }
+
+    if (toolCall.name === "run_qa_recipe") {
+      emitActivity(activity, "test", `Running QA recipe ${args.recipeId}`);
+      const result = await runQaRecipe(config, {
+        recipeId: args.recipeId,
+        activity,
+      });
+      return toolResult(true, addQaReportUrls(result));
+    }
+
     return toolResult(false, `Unknown tool: ${toolCall.name}`);
   } catch (error) {
     return toolResult(false, error.message);
@@ -481,6 +528,23 @@ function addDebugImageUrlsToInteractiveResult(result) {
         afterScreenshotUrl,
         beforeScreenshotMarkdown: beforeScreenshotUrl ? `[Open ${test.name} before screenshot](${beforeScreenshotUrl})` : "",
         afterScreenshotMarkdown: afterScreenshotUrl ? `[Open ${test.name} after screenshot](${afterScreenshotUrl})` : "",
+      };
+    }),
+  };
+}
+
+function addQaReportUrls(result) {
+  const reportUrl = result.reportPath ? `/api/local-file?path=${encodeURIComponent(result.reportPath)}` : "";
+  return {
+    ...result,
+    reportUrl,
+    reportMarkdown: reportUrl ? `[Open QA report](${reportUrl})` : "",
+    screenshots: (result.screenshots || []).map((screenshot) => {
+      const screenshotUrl = absoluteLocalImageUrl(screenshot.path || "");
+      return {
+        ...screenshot,
+        screenshotUrl,
+        screenshotMarkdown: screenshotUrl ? `[Open ${screenshot.name || "QA screenshot"}](${screenshotUrl})` : "",
       };
     }),
   };

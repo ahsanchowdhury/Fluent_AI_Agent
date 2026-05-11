@@ -1,0 +1,27 @@
+{
+  "name": "WordPress Admin - Dashboard Smoke Test",
+  "product": "wordpress",
+  "area": "admin",
+  "risk": "low",
+  "description": "Logs in to WordPress Admin, opens the Dashboard, confirms it loaded, and captures a screenshot.",
+  "steps": [
+    {
+      "action": "login_admin",
+      "label": "Log in to WordPress Admin"
+    },
+    {
+      "action": "go_to",
+      "path": "/",
+      "label": "Open Dashboard"
+    },
+    {
+      "action": "assert_text",
+      "text": "Dashboard",
+      "label": "Confirm Dashboard text"
+    },
+    {
+      "action": "screenshot",
+      "name": "wordpress-admin-dashboard"
+    }
+  ]
+}

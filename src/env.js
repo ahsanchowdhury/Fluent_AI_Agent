@@ -48,6 +48,9 @@ export function getConfig() {
       "/Applications/XAMPP/xamppfiles/htdocs/sites/wp-content/plugins",
     docsRoot: process.env.DOCS_ROOT || path.resolve(process.cwd(), "docs"),
     localSiteUrl: process.env.LOCAL_SITE_URL || "http://localhost/sites",
+    wpAdminUrl: process.env.WP_ADMIN_URL || "http://localhost/sites/wp-admin/",
+    wpAdminUser: process.env.WP_ADMIN_USER || "",
+    wpAdminPassword: process.env.WP_ADMIN_PASSWORD || "",
     wpDebugLog:
       process.env.WP_DEBUG_LOG ||
       "/Applications/XAMPP/xamppfiles/htdocs/sites/wp-content/debug.log",

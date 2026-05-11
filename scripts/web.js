@@ -51,6 +51,25 @@ app.get("/api/local-image", (request, response) => {
   });
 });
 
+app.get("/api/local-file", (request, response) => {
+  const filePath = String(request.query?.path || "");
+  const resolvedPath = path.resolve(filePath);
+  const allowedRoots = [
+    path.resolve(process.cwd(), "memory", "qa-reports"),
+  ];
+
+  if (!allowedRoots.some((root) => resolvedPath.startsWith(`${root}${path.sep}`))) {
+    response.status(403).send("File is outside the allowed agent memory folder.");
+    return;
+  }
+
+  response.sendFile(resolvedPath, (error) => {
+    if (error && !response.headersSent) {
+      response.status(404).send("File not found.");
+    }
+  });
+});
+
 app.get("/api/status", async (_request, response) => {
   const current = buildIndexManifest(config, { path: "." });
   const previous = readSavedManifest();
