@@ -18,7 +18,7 @@ export async function askModel(client, { input, config }) {
   return result.text;
 }
 
-export async function createAgentResponse(client, { input, config, previousResponseId = null, images = [] }) {
+export async function createAgentResponse(client, { input, config, previousResponseId = null, images = [], activity = null }) {
   const tools = buildTools(config);
   const siteFacts = await buildSiteFacts(config);
   const docLinkHints = buildDocLinkHints(config, input);
@@ -92,14 +92,16 @@ export async function createAgentResponse(client, { input, config, previousRespo
       break;
     }
 
+    emitActivity(activity, "tool", `Running ${toolCalls.length} tool${toolCalls.length === 1 ? "" : "s"}`);
     const toolOutputs = await Promise.all(
       toolCalls.map(async (toolCall) => ({
         type: "function_call_output",
         call_id: toolCall.call_id,
-        output: await runAgentTool(config, toolCall),
+        output: await runAgentTool(config, toolCall, { activity }),
       }))
     );
 
+    emitActivity(activity, "ai", "Reviewing tool results");
     response = await client.responses.create({
       model: config.openaiModel,
       instructions: [
@@ -130,6 +132,12 @@ export async function createAgentResponse(client, { input, config, previousRespo
     text: response.output_text || "",
     responseId: response.id,
   };
+}
+
+function emitActivity(activity, type, message, detail = "") {
+  if (typeof activity === "function") {
+    activity(type, message, detail);
+  }
 }
 
 function buildDocLinkHints(config, input) {

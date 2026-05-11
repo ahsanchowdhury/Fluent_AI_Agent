@@ -1,11 +1,13 @@
 import fs from "fs";
 import path from "path";
 import { chromium } from "playwright";
+import { emitActivity } from "../activity.js";
 
 const MAX_EVENTS = 80;
 
 export async function debugPage(config, options = {}) {
   const url = buildUrl(config.localSiteUrl, options.path || options.url || "");
+  const activity = options.activity || null;
   const screenshotDir = path.resolve(process.cwd(), "memory", "screenshots");
   fs.mkdirSync(screenshotDir, { recursive: true });
 
@@ -61,6 +63,7 @@ export async function debugPage(config, options = {}) {
   let navigationError = "";
 
   try {
+    emitActivity(activity, "browser", `Visiting ${url}`);
     response = await page.goto(url, {
       waitUntil: "networkidle",
       timeout: options.timeout || 20000,
@@ -70,10 +73,12 @@ export async function debugPage(config, options = {}) {
   }
 
   const title = await page.title().catch(() => "");
+  emitActivity(activity, "browser", `Page loaded: ${title || page.url()}`);
   const finalUrl = page.url();
   const bodyText = await page.locator("body").innerText({ timeout: 2000 }).catch(() => "");
   const screenshotPath = path.join(screenshotDir, `${Date.now()}-page.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true }).catch(() => null);
+  emitActivity(activity, "screenshot", "Captured page screenshot");
   await browser.close();
 
   return {
@@ -93,6 +98,7 @@ export async function debugPage(config, options = {}) {
 
 export async function testFormPage(config, options = {}) {
   const url = buildUrl(config.localSiteUrl, options.path || options.url || "");
+  const activity = options.activity || null;
   const screenshotDir = path.resolve(process.cwd(), "memory", "screenshots");
   fs.mkdirSync(screenshotDir, { recursive: true });
 
@@ -160,6 +166,7 @@ export async function testFormPage(config, options = {}) {
   let navigationError = "";
 
   try {
+    emitActivity(activity, "browser", `Visiting ${url}`);
     response = await page.goto(url, {
       waitUntil: "networkidle",
       timeout: options.timeout || 25000,
@@ -170,16 +177,23 @@ export async function testFormPage(config, options = {}) {
 
   const beforeScreenshotPath = path.join(screenshotDir, `${Date.now()}-form-before.png`);
   await page.screenshot({ path: beforeScreenshotPath, fullPage: true }).catch(() => null);
+  emitActivity(activity, "screenshot", "Captured form before screenshot");
 
   const beforeForms = await inspectForms(page);
+  emitActivity(activity, "form", `Found ${beforeForms.length} form${beforeForms.length === 1 ? "" : "s"} before submit`);
   const fillActions = await fillVisibleFormFields(page);
+  for (const action of fillActions.slice(0, 8)) {
+    emitActivity(activity, "form", describeFillAction(action));
+  }
   const submitResult = await submitFirstForm(page);
+  emitActivity(activity, "form", submitResult.submitted ? "Submitted the first visible form" : "Could not submit the first visible form");
   await page.waitForTimeout(options.afterSubmitWait || 1800);
   const afterForms = await inspectForms(page);
   const validationMessages = await collectValidationMessages(page);
   const visibleMessages = await collectVisibleMessages(page);
   const afterScreenshotPath = path.join(screenshotDir, `${Date.now()}-form-after.png`);
   await page.screenshot({ path: afterScreenshotPath, fullPage: true }).catch(() => null);
+  emitActivity(activity, "screenshot", "Captured form after screenshot");
 
   const title = await page.title().catch(() => "");
   const bodyText = await page.locator("body").innerText({ timeout: 2000 }).catch(() => "");
@@ -213,6 +227,7 @@ export async function testFormPage(config, options = {}) {
 
 export async function inspectInteractivePage(config, options = {}) {
   const url = buildUrl(config.localSiteUrl, options.path || options.url || "");
+  const activity = options.activity || null;
   const instructions = String(options.instructions || "").trim();
   const screenshotDir = path.resolve(process.cwd(), "memory", "screenshots");
   fs.mkdirSync(screenshotDir, { recursive: true });
@@ -283,6 +298,7 @@ export async function inspectInteractivePage(config, options = {}) {
   let navigationError = "";
 
   try {
+    emitActivity(activity, "browser", `Visiting ${url}`);
     response = await page.goto(url, {
       waitUntil: "domcontentloaded",
       timeout: options.timeout || 45000,
@@ -292,18 +308,20 @@ export async function inspectInteractivePage(config, options = {}) {
     navigationError = error.message;
   }
 
-  await acceptCookieBanner(page, actions);
-  await clickRequestedElement(page, instructions, actions);
+  await acceptCookieBanner(page, actions, activity);
+  await clickRequestedElement(page, instructions, actions, activity);
   await page.waitForTimeout(1500);
 
   const beforeScreenshotPath = path.join(screenshotDir, `${Date.now()}-interactive-before.png`);
   await page.screenshot({ path: beforeScreenshotPath, fullPage: true }).catch(() => null);
+  emitActivity(activity, "screenshot", "Captured initial interaction screenshot");
 
   const stepInspections = await inspectConversationalFormTargets(page, {
     screenshotDir,
     instructions,
     targetSteps,
     actions,
+    activity,
   });
   const behaviorTests = shouldRunInteractionBehaviorTests(instructions)
     ? await runConversationalBehaviorTests(url, {
@@ -312,11 +330,13 @@ export async function inspectInteractivePage(config, options = {}) {
         targetSteps,
         width: options.width || 1440,
         height: options.height || 1000,
+        activity,
       })
     : [];
 
   const afterScreenshotPath = path.join(screenshotDir, `${Date.now()}-interactive-after.png`);
   await page.screenshot({ path: afterScreenshotPath, fullPage: true }).catch(() => null);
+  emitActivity(activity, "screenshot", "Captured final interaction screenshot");
 
   const title = await page.title().catch(() => "");
   const bodyText = await page.locator("body").innerText({ timeout: 2000 }).catch(() => "");
@@ -347,7 +367,7 @@ export async function inspectInteractivePage(config, options = {}) {
   };
 }
 
-async function acceptCookieBanner(page, actions) {
+async function acceptCookieBanner(page, actions, activity = null) {
   const labels = [/^Accept$/i, /^Accept all$/i, /^Allow all$/i, /^Agree$/i, /^I agree$/i];
 
   for (const label of labels) {
@@ -355,13 +375,14 @@ async function acceptCookieBanner(page, actions) {
     if (await button.isVisible({ timeout: 1500 }).catch(() => false)) {
       await button.click({ timeout: 3000 }).catch(() => null);
       actions.push({ action: "accepted_cookie_banner", label: String(label) });
+      emitActivity(activity, "browser", "Accepted cookie banner");
       await page.waitForTimeout(700);
       return;
     }
   }
 }
 
-async function clickRequestedElement(page, instructions, actions) {
+async function clickRequestedElement(page, instructions, actions, activity = null) {
   const clickableText = extractClickableText(instructions);
   const candidates = clickableText ? [clickableText] : [];
 
@@ -374,6 +395,7 @@ async function clickRequestedElement(page, instructions, actions) {
     if (await locator.isVisible({ timeout: 2500 }).catch(() => false)) {
       await locator.click({ timeout: 7000 }).catch(() => null);
       actions.push({ action: "clicked_requested_link", label });
+      emitActivity(activity, "browser", `Clicked link: ${label}`);
       return;
     }
 
@@ -381,17 +403,20 @@ async function clickRequestedElement(page, instructions, actions) {
     if (await button.isVisible({ timeout: 1000 }).catch(() => false)) {
       await button.click({ timeout: 7000 }).catch(() => null);
       actions.push({ action: "clicked_requested_button", label });
+      emitActivity(activity, "browser", `Clicked button: ${label}`);
       return;
     }
   }
 }
 
-async function inspectConversationalFormTargets(page, { screenshotDir, instructions, targetSteps, actions }) {
+async function inspectConversationalFormTargets(page, { screenshotDir, instructions, targetSteps, actions, activity = null }) {
   const hasConversationalForm = await page.locator(".ffc_conv_form, .ff_conv_app, .ffc_conv_wrapper").count().catch(() => 0);
   if (!hasConversationalForm) {
+    emitActivity(activity, "form", "No conversational form detected");
     return [];
   }
 
+  emitActivity(activity, "form", "Detected conversational form");
   const inspections = [];
   const targets = targetSteps.length ? targetSteps : [null];
   const maxTransitions = 12;
@@ -406,13 +431,14 @@ async function inspectConversationalFormTargets(page, { screenshotDir, instructi
       const inspection = await inspectActiveConversationalStep(page, activeStep, screenshotDir);
       inspections.push(inspection);
       actions.push({ action: "inspected_conversational_step", step: activeStep.number, text: activeStep.text.slice(0, 120) });
+      emitActivity(activity, "form", `Inspected step ${activeStep.number}`);
 
       if (targetSteps.length && activeStep.number === targets.at(-1)) {
         break;
       }
     }
 
-    const advanced = await advanceConversationalStep(page, activeStep, actions, instructions);
+    const advanced = await advanceConversationalStep(page, activeStep, actions, instructions, activity);
     if (!advanced) {
       break;
     }
@@ -453,7 +479,7 @@ async function getActiveConversationalStep(page) {
   });
 }
 
-async function advanceConversationalStep(page, activeStep, actions, instructions) {
+async function advanceConversationalStep(page, activeStep, actions, instructions, activity = null) {
   const active = page.locator(".q-form:not(.q-is-inactive)").first();
   const activeText = activeStep.text.toLowerCase();
   const shouldAvoidFinalSubmit = /submit/i.test(activeStep.text) && /inspect|css|size|style|layout|reduce/i.test(instructions);
@@ -469,7 +495,8 @@ async function advanceConversationalStep(page, activeStep, actions, instructions
     await email.fill("");
     await page.keyboard.type(`agent-test-${Date.now()}@example.com`, { delay: 15 });
     actions.push({ action: "typed_email", step: activeStep.number });
-    return clickConversationalOk(active, actions, activeStep.number);
+    emitActivity(activity, "form", `Filled email on step ${activeStep.number}`);
+    return clickConversationalOk(active, actions, activeStep.number, activity);
   }
 
   const number = active.locator("input[type='number']").first();
@@ -478,7 +505,8 @@ async function advanceConversationalStep(page, activeStep, actions, instructions
     await number.fill("");
     await page.keyboard.type("10001", { delay: 15 });
     actions.push({ action: "typed_number", step: activeStep.number, value: "10001" });
-    return clickConversationalOk(active, actions, activeStep.number);
+    emitActivity(activity, "form", `Filled number field on step ${activeStep.number}`);
+    return clickConversationalOk(active, actions, activeStep.number, activity);
   }
 
   const textInput = active.locator("input:not([type]), input[type='text'], textarea").first();
@@ -487,7 +515,8 @@ async function advanceConversationalStep(page, activeStep, actions, instructions
     await textInput.fill("");
     await page.keyboard.type("Test response", { delay: 15 });
     actions.push({ action: "typed_text", step: activeStep.number });
-    return clickConversationalOk(active, actions, activeStep.number);
+    emitActivity(activity, "form", `Filled text field on step ${activeStep.number}`);
+    return clickConversationalOk(active, actions, activeStep.number, activity);
   }
 
   if (activeText.includes("choose as many") || activeText.includes("what type") || activeText.includes("select")) {
@@ -496,18 +525,20 @@ async function advanceConversationalStep(page, activeStep, actions, instructions
       const label = await option.innerText().catch(() => "");
       await option.click({ timeout: 5000 });
       actions.push({ action: "selected_first_choice", step: activeStep.number, label: label.replace(/\s+/g, " ").trim() });
-      return clickConversationalOk(active, actions, activeStep.number);
+      emitActivity(activity, "form", `Selected first choice on step ${activeStep.number}`);
+      return clickConversationalOk(active, actions, activeStep.number, activity);
     }
   }
 
-  return clickConversationalOk(active, actions, activeStep.number);
+  return clickConversationalOk(active, actions, activeStep.number, activity);
 }
 
-async function clickConversationalOk(activeLocator, actions, stepNumber) {
+async function clickConversationalOk(activeLocator, actions, stepNumber, activity = null) {
   const ok = activeLocator.locator(".o-btn-action").first();
   if (await ok.isVisible({ timeout: 1500 }).catch(() => false)) {
     await ok.click({ timeout: 5000 });
     actions.push({ action: "clicked_ok", step: stepNumber });
+    emitActivity(activity, "form", `Clicked action button on step ${stepNumber}`);
     return true;
   }
 
@@ -646,6 +677,7 @@ function shouldRunInteractionBehaviorTests(instructions) {
 
 async function runConversationalBehaviorTests(url, options = {}) {
   const targetStep = options.targetSteps?.[0] || extractTargetSteps(options.instructions)[0] || 3;
+  const activity = options.activity || null;
   const cases = [
     {
       name: "keyboard_enter_without_selection",
@@ -681,6 +713,7 @@ async function runConversationalBehaviorTests(url, options = {}) {
   const results = [];
 
   for (const testCase of cases) {
+    emitActivity(activity, "test", `Testing: ${testCase.label}`);
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({
       viewport: {
@@ -731,6 +764,7 @@ async function runConversationalBehaviorTests(url, options = {}) {
         instructions: options.instructions,
         targetStep,
         actions,
+        activity,
       });
       const modalBefore = await getVisibleModalState(page);
       const activeBefore = await getActiveConversationalStep(page);
@@ -784,6 +818,7 @@ async function runConversationalBehaviorTests(url, options = {}) {
         requestFailures,
         badResponses,
       });
+      emitActivity(activity, "test", `Result: ${testCase.name} ${results.at(-1).outcome?.type || "checked"}`);
     } catch (error) {
       results.push({
         name: testCase.name,
@@ -797,6 +832,7 @@ async function runConversationalBehaviorTests(url, options = {}) {
         requestFailures,
         badResponses,
       });
+      emitActivity(activity, "error", `Behavior test failed: ${testCase.name}`);
     } finally {
       await browser.close().catch(() => null);
     }
@@ -805,14 +841,15 @@ async function runConversationalBehaviorTests(url, options = {}) {
   return results;
 }
 
-async function prepareConversationalFormAtStep(page, url, { instructions, targetStep, actions }) {
+async function prepareConversationalFormAtStep(page, url, { instructions, targetStep, actions, activity = null }) {
+  emitActivity(activity, "browser", `Preparing page at ${url}`);
   await page.goto(url, {
     waitUntil: "domcontentloaded",
     timeout: 45000,
   });
   await page.waitForTimeout(3000);
-  await acceptCookieBanner(page, actions);
-  await clickRequestedElement(page, instructions, actions);
+  await acceptCookieBanner(page, actions, activity);
+  await clickRequestedElement(page, instructions, actions, activity);
   await page.waitForTimeout(1500);
 
   for (let guard = 0; guard < 12; guard += 1) {
@@ -823,7 +860,7 @@ async function prepareConversationalFormAtStep(page, url, { instructions, target
     if (activeStep.number >= targetStep) {
       return activeStep;
     }
-    const advanced = await advanceConversationalStep(page, activeStep, actions, `${instructions}\nReach step ${targetStep} for behavior testing.`);
+    const advanced = await advanceConversationalStep(page, activeStep, actions, `${instructions}\nReach step ${targetStep} for behavior testing.`, activity);
     if (!advanced) {
       throw new Error(`Could not advance past step ${activeStep.number}.`);
     }
@@ -1101,6 +1138,14 @@ async function submitFirstForm(page) {
     form.submit();
     return { ok: true, method: "submit" };
   });
+}
+
+function describeFillAction(action) {
+  const field = action.field ? ` ${action.field}` : "";
+  if (action.action === "fill") return `Filled${field}`;
+  if (action.action === "select") return `Selected option for${field}`;
+  if (action.action === "check") return `Checked${field}`;
+  return `Updated form field${field}`;
 }
 
 async function collectValidationMessages(page) {

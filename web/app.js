@@ -20,6 +20,7 @@ const imagePreviewList = document.querySelector("#imagePreviewList");
 const lightThemeButton = document.querySelector("#lightThemeButton");
 const darkThemeButton = document.querySelector("#darkThemeButton");
 let selectedImages = [];
+let activityPoll = null;
 
 applyTheme(localStorage.getItem(themeStorageKey) || "light");
 
@@ -46,10 +47,13 @@ form.addEventListener("submit", async (event) => {
   updateConversationTitle(text || images[0]?.name || "Image analysis");
   setBusy(true);
   const pending = addThinkingMessage();
+  const requestId = crypto.randomUUID();
+  startActivityPolling(requestId, pending);
 
   try {
     const result = await postJson("/api/chat", {
       conversationId: activeConversationId,
+      requestId,
       message: text,
       images,
       history: getActiveConversation().messages.slice(-12),
@@ -63,6 +67,8 @@ form.addEventListener("submit", async (event) => {
     setMessageText(pending, `Error: ${error.message}`);
     pending.querySelector(".message").classList.add("system");
   } finally {
+    await refreshActivity(requestId, pending);
+    stopActivityPolling();
     setBusy(false);
   }
 });
@@ -269,6 +275,13 @@ function appendMessage(messageData) {
 function addThinkingMessage(label = "Thinking") {
   const row = addMessage("assistant", "");
   row.querySelector(".body").innerHTML = `${escapeHtml(label)} <span class="typing"><span></span><span></span><span></span></span>`;
+  const activity = document.createElement("div");
+  activity.className = "activity-panel";
+  activity.innerHTML = `
+    <div class="activity-title">Working steps</div>
+    <ol class="activity-list"></ol>
+  `;
+  row.querySelector(".message").append(activity);
   return row;
 }
 
@@ -309,6 +322,62 @@ function setBusy(isBusy) {
   rewriteButton.disabled = isBusy;
   attachImageButton.disabled = isBusy;
   sendButton.textContent = isBusy ? "Sending" : "Send";
+}
+
+function startActivityPolling(requestId, row) {
+  stopActivityPolling();
+  refreshActivity(requestId, row);
+  activityPoll = window.setInterval(() => refreshActivity(requestId, row), 900);
+}
+
+function stopActivityPolling() {
+  if (activityPoll) {
+    window.clearInterval(activityPoll);
+    activityPoll = null;
+  }
+}
+
+async function refreshActivity(requestId, row) {
+  if (!requestId || !row?.isConnected) return;
+  try {
+    const session = await fetchJson(`/api/chat/activity/${encodeURIComponent(requestId)}`);
+    renderActivity(row, session.events || [], session.finished === true);
+  } catch (_error) {
+    // Activity is a helper UI; the main chat response still handles errors.
+  }
+}
+
+function renderActivity(row, events, finished) {
+  const panel = row.querySelector(".activity-panel");
+  if (!panel) return;
+
+  const list = panel.querySelector(".activity-list");
+  list.innerHTML = "";
+  const visibleEvents = events.slice(-18);
+
+  for (const [index, event] of visibleEvents.entries()) {
+    const item = document.createElement("li");
+    const isLast = index === visibleEvents.length - 1;
+    item.className = `activity-item ${isLast && !finished ? "active" : "done"} ${event.type || "info"}`;
+
+    const marker = document.createElement("span");
+    marker.className = "activity-marker";
+    marker.textContent = isLast && !finished ? "→" : "✓";
+
+    const text = document.createElement("span");
+    text.className = "activity-text";
+    text.textContent = event.message || "Working";
+
+    item.append(marker, text);
+    list.append(item);
+  }
+
+  panel.classList.toggle("finished", finished);
+  if (finished && !visibleEvents.length) {
+    panel.remove();
+  }
+
+  messages.scrollTop = messages.scrollHeight;
 }
 
 async function runComposerAction(action) {

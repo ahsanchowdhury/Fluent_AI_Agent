@@ -4,6 +4,7 @@ import {
   readTextFile,
   searchTextFiles,
 } from "./tools/filesystem.js";
+import { emitActivity } from "./activity.js";
 import { localImageUrl } from "./imageInputs.js";
 import {
   lintPhpFile,
@@ -303,8 +304,9 @@ export const agentTools = [
   },
 ];
 
-export async function runAgentTool(config, toolCall) {
+export async function runAgentTool(config, toolCall, options = {}) {
   let args = {};
+  const activity = options.activity || null;
 
   try {
     args = toolCall.arguments ? JSON.parse(toolCall.arguments) : {};
@@ -314,6 +316,7 @@ export async function runAgentTool(config, toolCall) {
 
   try {
     if (toolCall.name === "list_plugins") {
+      emitActivity(activity, "files", "Listing installed plugin folders");
       const plugins = listPluginDirectories(config.pluginRoot).map((plugin) => ({
         name: plugin.name,
         mainFiles: plugin.mainFiles.map((file) =>
@@ -325,6 +328,7 @@ export async function runAgentTool(config, toolCall) {
     }
 
     if (toolCall.name === "list_files") {
+      emitActivity(activity, "files", `Listing files in ${args.path || "."}`);
       const files = listFiles(config.pluginRoot, {
         path: args.path || ".",
         maxFiles: args.maxFiles || 300,
@@ -334,11 +338,13 @@ export async function runAgentTool(config, toolCall) {
     }
 
     if (toolCall.name === "read_file") {
+      emitActivity(activity, "files", `Reading ${args.path}`);
       const file = readTextFile(config.pluginRoot, args.path);
       return toolResult(true, file);
     }
 
     if (toolCall.name === "search_files") {
+      emitActivity(activity, "files", `Searching plugin files for "${args.query || ""}"`);
       return toolResult(
         true,
         searchTextFiles(config.pluginRoot, {
@@ -351,6 +357,7 @@ export async function runAgentTool(config, toolCall) {
     }
 
     if (toolCall.name === "search_docs") {
+      emitActivity(activity, "docs", `Searching docs and saved replies for "${args.query || ""}"`);
       return toolResult(
         true,
         searchTextFiles(config.docsRoot, {
@@ -363,6 +370,7 @@ export async function runAgentTool(config, toolCall) {
     }
 
     if (toolCall.name === "search_doc_links") {
+      emitActivity(activity, "docs", `Searching official doc links for "${args.query || ""}"`);
       return toolResult(
         true,
         searchTrustedDocLinks(config, {
@@ -374,40 +382,49 @@ export async function runAgentTool(config, toolCall) {
     }
 
     if (toolCall.name === "read_doc") {
+      emitActivity(activity, "docs", `Reading doc ${args.path}`);
       const file = readTextFile(config.docsRoot, args.path);
       return toolResult(true, file);
     }
 
     if (toolCall.name === "tail_debug_log") {
+      emitActivity(activity, "wordpress", "Reading WordPress debug log");
       return toolResult(true, tailDebugLog(config.wpDebugLog, args.lines || 120));
     }
 
     if (toolCall.name === "lint_php_file") {
+      emitActivity(activity, "code", `Linting ${args.path}`);
       return toolResult(true, await lintPhpFile(config.pluginRoot, args.path));
     }
 
     if (toolCall.name === "wp_cli_plugin_list") {
+      emitActivity(activity, "wordpress", "Checking plugin status with WP-CLI");
       return toolResult(true, await wpCliPluginList(config.pluginRoot));
     }
 
     if (toolCall.name === "get_wordpress_site_summary") {
+      emitActivity(activity, "wordpress", "Reading WordPress site summary");
       return toolResult(true, await getWordPressSiteSummary(config));
     }
 
     if (toolCall.name === "debug_browser_page") {
-      const result = await debugPage(config, { path: args.path || "" });
+      emitActivity(activity, "browser", "Opening page in browser");
+      const result = await debugPage(config, { path: args.path || "", activity });
       return toolResult(true, addDebugImageUrls(result));
     }
 
     if (toolCall.name === "test_form_page") {
-      const result = await testFormPage(config, { path: args.path || "" });
+      emitActivity(activity, "browser", "Testing form like a user");
+      const result = await testFormPage(config, { path: args.path || "", activity });
       return toolResult(true, addDebugImageUrls(result));
     }
 
     if (toolCall.name === "inspect_interactive_page") {
+      emitActivity(activity, "browser", "Running interactive page inspection");
       const result = await inspectInteractivePage(config, {
         path: args.path || "",
         instructions: args.instructions || "",
+        activity,
       });
       return toolResult(true, compactInteractiveResult(addDebugImageUrlsToInteractiveResult(result)));
     }

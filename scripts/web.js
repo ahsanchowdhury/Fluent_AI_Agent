@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { maybeAutoIndex } from "../src/autoIndex.js";
+import { createActivityEmitter, createActivityStore } from "../src/activity.js";
 import { buildIndexManifest, diffManifests, readSavedManifest, syncCodeVectorStore } from "../src/codeIndex.js";
 import { collectDebugContext, analyzeDebugContext, saveDebugContext } from "../src/debugWorkflow.js";
 import { getConfig, loadEnv, maskSecret } from "../src/env.js";
@@ -25,6 +26,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(dirname, "..", "web");
 const conversations = new Map();
 const conversationActionContext = new Map();
+const activityStore = createActivityStore();
 
 app.use(express.json({ limit: "40mb" }));
 app.use(express.static(publicDir));
@@ -87,6 +89,10 @@ app.get("/api/site-summary", async (_request, response) => {
   response.json(result.summary);
 });
 
+app.get("/api/chat/activity/:requestId", (request, response) => {
+  response.json(activityStore.get(String(request.params.requestId || "")));
+});
+
 app.get("/api/themes", async (_request, response) => {
   const result = await listThemes(config);
   if (!result.ok) {
@@ -134,36 +140,47 @@ app.post("/api/theme-action", async (request, response) => {
 app.post("/api/chat", async (request, response) => {
   const message = String(request.body?.message || "").trim();
   const conversationId = String(request.body?.conversationId || "default");
+  const requestId = String(request.body?.requestId || `${conversationId}-${Date.now()}`);
   const history = Array.isArray(request.body?.history) ? request.body.history : [];
   const images = Array.isArray(request.body?.images) ? request.body.images : [];
+  activityStore.start(requestId);
+  const activity = createActivityEmitter(activityStore, requestId);
 
   if (!message && !images.length) {
+    activityStore.finish(requestId);
     response.status(400).json({ error: "Message or image is required." });
     return;
   }
 
   try {
+    activity("start", "Reading your request");
     const wordpressAction = await detectWordPressAction(config, message, {
       conversationId,
       context: conversationActionContext,
       history,
     });
     if (wordpressAction) {
+      activity("wordpress", `Running WordPress action: ${wordpressAction.action}`);
       const result = await executeWordPressAction(config, wordpressAction);
       rememberWordPressAction(conversationActionContext, conversationId, wordpressAction, result);
+      activity("done", "WordPress action finished");
+      activityStore.finish(requestId);
       response.json({ text: formatActionResult(result) });
       return;
     }
 
     if (config.autoIndexOnChat) {
+      activity("memory", "Checking code memory index");
       await maybeAutoIndex(config, "web chat");
     }
 
+    activity("ai", "Asking the model which tools it needs");
     const result = await createAgentResponse(client, {
       input: message,
       config,
       previousResponseId: conversations.get(conversationId) || null,
       images,
+      activity,
     });
 
     conversations.set(conversationId, result.responseId);
@@ -171,9 +188,15 @@ app.post("/api/chat", async (request, response) => {
       ...image,
       url: localImageUrl(image.path),
     }));
+    activity("done", "Final response ready");
+    activityStore.finish(requestId);
     response.json({ text: result.text, responseId: result.responseId, images: savedImages });
   } catch (error) {
+    activity("error", `Request failed: ${error.message}`);
+    activityStore.finish(requestId);
     response.status(500).json({ error: error.message });
+  } finally {
+    activityStore.cleanup();
   }
 });
 
