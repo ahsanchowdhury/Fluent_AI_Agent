@@ -23,14 +23,6 @@ let selectedImages = [];
 
 applyTheme(localStorage.getItem(themeStorageKey) || "light");
 
-document.querySelector("#debugHome").addEventListener("click", () => runDebug(""));
-document.querySelector("#debugPathButton").addEventListener("click", () => {
-  runDebug(document.querySelector("#debugPath").value.trim());
-});
-document.querySelector("#formTestButton").addEventListener("click", () => {
-  runDebug(document.querySelector("#debugPath").value.trim(), { formTest: true });
-});
-document.querySelector("#syncIndex").addEventListener("click", syncIndex);
 document.querySelector("#resetChat").addEventListener("click", resetChat);
 attachImageButton.addEventListener("click", () => imageInput.click());
 imageInput.addEventListener("change", handleImageSelection);
@@ -113,47 +105,6 @@ async function loadStatus() {
   }
 
   await loadThemes();
-}
-
-async function runDebug(path, options = {}) {
-  addMessage("system", `${options.formTest ? "Testing form" : "Running debug"}${path ? ` for ${path}` : " for homepage"}...`);
-  const pending = addThinkingMessage(options.formTest ? "Interacting with page" : "Collecting diagnostics");
-
-  try {
-    const result = await postJson("/api/debug", { path, formTest: options.formTest === true });
-    setMessageText(pending, [
-      result.text,
-      result.contextPath ? `\nDiagnostic context: ${result.contextPath}` : "",
-      result.beforeScreenshotPath ? `Before screenshot: ${result.beforeScreenshotPath}` : "",
-      result.afterScreenshotPath ? `After screenshot: ${result.afterScreenshotPath}` : "",
-      result.screenshotPath ? `Screenshot: ${result.screenshotPath}` : "",
-    ].filter(Boolean).join("\n"));
-    setMessageImages(
-      pending,
-      [
-        result.beforeScreenshotUrl ? { name: "Before screenshot", url: result.beforeScreenshotUrl } : null,
-        result.afterScreenshotUrl ? { name: "After screenshot", url: result.afterScreenshotUrl } : null,
-        !result.afterScreenshotUrl && result.screenshotUrl ? { name: "Screenshot", url: result.screenshotUrl } : null,
-      ].filter(Boolean)
-    );
-  } catch (error) {
-    setMessageText(pending, `Error: ${error.message}`);
-    pending.querySelector(".message").classList.add("system");
-  }
-}
-
-async function syncIndex() {
-  addMessage("system", "Syncing code memory...");
-  const pending = addThinkingMessage("Checking installed plugin files");
-
-  try {
-    const result = await postJson("/api/index-sync", {});
-    setMessageText(pending, `${result.message}\nVector store: ${result.vectorStoreId || "unchanged"}`);
-    await loadStatus();
-  } catch (error) {
-    setMessageText(pending, `Error: ${error.message}`);
-    pending.querySelector(".message").classList.add("system");
-  }
 }
 
 async function resetChat() {
@@ -658,7 +609,7 @@ function renderMarkdownTable(lines) {
 
 function appendInlineMarkdown(parent, text) {
   const value = String(text || "");
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>"']+)/g;
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\((?:https?:\/\/|\/)[^)\s]+\)|https?:\/\/[^\s<>"']+)/g;
   let lastIndex = 0;
 
   for (const match of value.matchAll(pattern)) {
@@ -676,7 +627,7 @@ function appendInlineMarkdown(parent, text) {
       strong.textContent = token.slice(2, -2);
       parent.append(strong);
     } else {
-      const markdownLink = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+      const markdownLink = token.match(/^\[([^\]]+)\]\(((?:https?:\/\/|\/)[^)\s]+)\)$/);
       const url = markdownLink ? markdownLink[2] : token.replace(/[),.;:!?]+$/g, "");
       const trailing = markdownLink ? "" : token.slice(url.length);
       const link = document.createElement("a");

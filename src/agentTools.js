@@ -4,6 +4,7 @@ import {
   readTextFile,
   searchTextFiles,
 } from "./tools/filesystem.js";
+import { localImageUrl } from "./imageInputs.js";
 import {
   lintPhpFile,
   getWordPressSiteSummary,
@@ -242,7 +243,7 @@ export const agentTools = [
     type: "function",
     name: "debug_browser_page",
     description:
-      "Visit the configured local WordPress site or a relative path with a headless browser and return page status, title, console errors, network failures, bad HTTP responses, body preview, and screenshot path.",
+      "Visit a local or external URL with a headless browser and return page status, title, console errors, network failures, bad HTTP responses, body preview, and screenshot link. Use this when the user asks to debug, inspect, check, or troubleshoot a page URL.",
     strict: true,
     parameters: {
       type: "object",
@@ -250,7 +251,7 @@ export const agentTools = [
         path: {
           type: "string",
           description:
-            "Relative path under LOCAL_SITE_URL, absolute URL, or empty string for the local site homepage.",
+            "Relative path under LOCAL_SITE_URL, absolute URL such as https://example.com/page, or empty string for the local site homepage.",
         },
       },
       required: ["path"],
@@ -261,7 +262,7 @@ export const agentTools = [
     type: "function",
     name: "test_form_page",
     description:
-      "Act like a human tester on a page with forms: inspect visible/hidden/required fields, fill visible fields with safe test values, submit the first form, capture screenshots, and report validation blockers.",
+      "Act like a human tester on a local or external page with forms: inspect visible/hidden/required fields, fill visible fields with safe test values, submit the first form, capture screenshots, and report validation blockers. Use this when the user says a form is not submitting or asks to test a form URL.",
     strict: true,
     parameters: {
       type: "object",
@@ -269,7 +270,7 @@ export const agentTools = [
         path: {
           type: "string",
           description:
-            "Relative path under LOCAL_SITE_URL, absolute URL, or empty string for the local site homepage.",
+            "Relative path under LOCAL_SITE_URL, absolute URL such as https://example.com/contact, or empty string for the local site homepage.",
         },
       },
       required: ["path"],
@@ -370,11 +371,13 @@ export async function runAgentTool(config, toolCall) {
     }
 
     if (toolCall.name === "debug_browser_page") {
-      return toolResult(true, await debugPage(config, { path: args.path || "" }));
+      const result = await debugPage(config, { path: args.path || "" });
+      return toolResult(true, addDebugImageUrls(result));
     }
 
     if (toolCall.name === "test_form_page") {
-      return toolResult(true, await testFormPage(config, { path: args.path || "" }));
+      const result = await testFormPage(config, { path: args.path || "" });
+      return toolResult(true, addDebugImageUrls(result));
     }
 
     return toolResult(false, `Unknown tool: ${toolCall.name}`);
@@ -391,6 +394,31 @@ function toolResult(ok, value) {
   }
 
   return `${payload.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n...TRUNCATED...`;
+}
+
+function addDebugImageUrls(result) {
+  const screenshotUrl = absoluteLocalImageUrl(result.screenshotPath || "");
+  const beforeScreenshotUrl = absoluteLocalImageUrl(result.beforeScreenshotPath || "");
+  const afterScreenshotUrl = absoluteLocalImageUrl(result.afterScreenshotPath || "");
+
+  return {
+    ...result,
+    screenshotUrl,
+    beforeScreenshotUrl,
+    afterScreenshotUrl,
+    screenshotMarkdown: screenshotUrl ? `[Open screenshot](${screenshotUrl})` : "",
+    beforeScreenshotMarkdown: beforeScreenshotUrl ? `[Open before screenshot](${beforeScreenshotUrl})` : "",
+    afterScreenshotMarkdown: afterScreenshotUrl ? `[Open after screenshot](${afterScreenshotUrl})` : "",
+  };
+}
+
+function absoluteLocalImageUrl(filePath) {
+  const relativeUrl = localImageUrl(filePath);
+  if (!relativeUrl) {
+    return "";
+  }
+
+  return `http://127.0.0.1:${process.env.AGENT_WEB_PORT || 3333}${relativeUrl}`;
 }
 
 export function searchTrustedDocLinks(config, { product = "", query = "", maxResults = 5 }) {
