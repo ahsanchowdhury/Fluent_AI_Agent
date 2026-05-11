@@ -11,7 +11,7 @@ import {
   tailDebugLog,
   wpCliPluginList,
 } from "./tools/wordpress.js";
-import { debugPage, testFormPage } from "./tools/browser.js";
+import { debugPage, inspectInteractivePage, testFormPage } from "./tools/browser.js";
 
 const MAX_TOOL_OUTPUT_CHARS = 70000;
 
@@ -277,6 +277,30 @@ export const agentTools = [
       additionalProperties: false,
     },
   },
+  {
+    type: "function",
+    name: "inspect_interactive_page",
+    description:
+      "Follow natural-language browser instructions on a local or external URL, including clicking a named button/link, handling cookie banners, filling conversational multi-step forms safely, stopping before final submit, inspecting requested steps/screens, capturing screenshots, extracting computed styles/selectors, and returning targeted CSS suggestions. Use this for complex UI/debug requests like 'click here, fill the form, go to steps 3 and 4, inspect layout, and share CSS'.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description:
+            "Relative path under LOCAL_SITE_URL or absolute URL such as https://example.com/page.",
+        },
+        instructions: {
+          type: "string",
+          description:
+            "The user's browser/debug instructions, including what to click, what to fill, which steps/screens to inspect, and what output is needed.",
+        },
+      },
+      required: ["path", "instructions"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export async function runAgentTool(config, toolCall) {
@@ -380,6 +404,14 @@ export async function runAgentTool(config, toolCall) {
       return toolResult(true, addDebugImageUrls(result));
     }
 
+    if (toolCall.name === "inspect_interactive_page") {
+      const result = await inspectInteractivePage(config, {
+        path: args.path || "",
+        instructions: args.instructions || "",
+      });
+      return toolResult(true, addDebugImageUrlsToInteractiveResult(result));
+    }
+
     return toolResult(false, `Unknown tool: ${toolCall.name}`);
   } catch (error) {
     return toolResult(false, error.message);
@@ -409,6 +441,20 @@ function addDebugImageUrls(result) {
     screenshotMarkdown: screenshotUrl ? `[Open screenshot](${screenshotUrl})` : "",
     beforeScreenshotMarkdown: beforeScreenshotUrl ? `[Open before screenshot](${beforeScreenshotUrl})` : "",
     afterScreenshotMarkdown: afterScreenshotUrl ? `[Open after screenshot](${afterScreenshotUrl})` : "",
+  };
+}
+
+function addDebugImageUrlsToInteractiveResult(result) {
+  return {
+    ...addDebugImageUrls(result),
+    stepInspections: (result.stepInspections || []).map((step) => {
+      const screenshotUrl = absoluteLocalImageUrl(step.screenshotPath || "");
+      return {
+        ...step,
+        screenshotUrl,
+        screenshotMarkdown: screenshotUrl ? `[Open step ${step.step} screenshot](${screenshotUrl})` : "",
+      };
+    }),
   };
 }
 
