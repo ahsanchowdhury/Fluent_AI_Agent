@@ -286,6 +286,7 @@ function addThinkingMessage(label = "Thinking") {
 }
 
 function setMessageText(row, text) {
+  removeActivityPanel(row);
   renderMessageBody(row.querySelector(".body"), text);
   const messageId = row.dataset.messageId;
   const conversation = getActiveConversation();
@@ -298,6 +299,10 @@ function setMessageText(row, text) {
     renderConversations();
   }
   messages.scrollTop = messages.scrollHeight;
+}
+
+function removeActivityPanel(row) {
+  row.querySelector(".activity-panel")?.remove();
 }
 
 function setMessageImages(row, images = []) {
