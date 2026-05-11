@@ -19,9 +19,19 @@ export async function askModel(client, { input, config }) {
 }
 
 export async function createAgentResponse(client, { input, config, previousResponseId = null, images = [], activity = null }) {
+  emitActivity(activity, "ai", "Preparing support research");
+  if (hasMultipleQuestions(input)) {
+    emitActivity(activity, "ai", "Splitting the message into separate questions");
+  }
   const tools = buildTools(config);
+  emitActivity(activity, "wordpress", "Reading current WordPress site facts");
   const siteFacts = await buildSiteFacts(config);
+  emitActivity(activity, "docs", "Checking official documentation link index");
   const docLinkHints = buildDocLinkHints(config, input);
+  const deterministicHints = buildDeterministicSupportHints(config, input, activity);
+  if (config.openaiVectorStoreId) {
+    emitActivity(activity, "memory", "Code and docs vector memory is available");
+  }
   const normalizedInput = buildUserInput(input, images);
   const request = {
     model: config.openaiModel,
@@ -34,6 +44,12 @@ export async function createAgentResponse(client, { input, config, previousRespo
         : "No vector store code memory is configured yet. Use local read-only tools instead.",
       "You may also read WordPress site facts, the WordPress debug log, lint PHP files, check WP-CLI plugin status, and visit the local site with a headless browser.",
       "For client-style feature questions, act like a careful support agent: first search_docs in 'golden-answers' for a matching saved reply, then identify the product, then use search_doc_links for a relevant official documentation URL for that product, then verify the requested feature in product docs/code/files as needed.",
+      "If the user asks multiple questions in one message, split them and answer each question separately. Do not let a product prefix on one question control unrelated account, billing, discount, refund, license, invoice, or subscription questions.",
+      "For mixed product + account questions, use product documentation/code for the product question and use golden-answer saved replies for account/policy questions. Example: a Fluent Forms Stripe feature question must be checked against Fluent Forms docs/code, while a non-profit discount question must use the WPManageNinja non-profit saved reply.",
+      "For account/policy questions about non-profit/not-for-profit discounts, refunds, trials, renewals, invoices, billing address, licenses, upgrades, downgrades, password reset, or payment method updates, search_docs in 'golden-answers' first and adapt the matching saved reply. These questions are company policy questions, not product feature questions.",
+      "When deterministic support hints say a golden-answer saved reply matched, you must use that saved reply. Do not say the information was not found in product docs, because product docs are not the source for company policy answers.",
+      "When deterministic support hints include product-specific code evidence, use that product evidence directly. Do not cite or recommend another product for that same answer unless the primary product evidence says the feature is unavailable.",
+      "If deterministic support hints include Fluent Forms Stripe code evidence, answer as Fluent Forms evidence. Do not say the feature is Paymattic-only, do not cite Paymattic as the source, and ignore conflicting vector-memory results from other products for that Fluent Forms answer.",
       "Do not hardcode Fluent Support as the primary plugin. Fluent Support is only one example. The primary plugin might be FluentCRM, Bit File Manager, Live Chat for Fluent Support, My Shop Loyalty System, Plugin Check, WP Debug Hub, or any other installed plugin.",
       "If the primary plugin has a Pro/add-on/extension folder in the installed plugin list, inspect both the base plugin and related add-on folders before concluding a feature is missing. For example, a Fluent Support question should check both 'fluent-support' and 'fluent-support-pro'.",
       "Do not answer feature-availability questions from memory alone. Use get_wordpress_site_summary and search_files/read_file or file_search before saying a plugin can or cannot do something.",
@@ -74,6 +90,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       `Configured WP debug log: ${config.wpDebugLog}`,
       siteFacts,
       docLinkHints,
+      deterministicHints,
     ].join("\n"),
     tools,
     input: normalizedInput,
@@ -87,6 +104,10 @@ export async function createAgentResponse(client, { input, config, previousRespo
 
   for (let i = 0; i < 5; i += 1) {
     const toolCalls = response.output.filter((item) => item.type === "function_call");
+    const fileSearchCalls = response.output.filter((item) => item.type === "file_search_call");
+    if (fileSearchCalls.length) {
+      emitActivity(activity, "memory", "Searched code/docs vector memory");
+    }
 
     if (!toolCalls.length) {
       break;
@@ -107,8 +128,11 @@ export async function createAgentResponse(client, { input, config, previousRespo
       instructions: [
         "You are a local WordPress support agent and plugin debugging assistant.",
         "Continue answering using the read-only diagnostic and search tool results provided.",
+        "If the original user message contains multiple questions, answer each one separately with the correct source. Product questions use product docs/code; account, billing, discount, refund, license, invoice, renewal, and policy questions use golden-answer saved replies when matched.",
         "For support questions, state which primary plugin you verified first, then any workaround found in other installed plugins.",
         "If a matching golden answer was found with search_docs/read_doc, adapt that saved reply and do not add unrelated developer/API details.",
+        "If deterministic support hints include a matched golden-answer saved reply, use it as the source of truth for that part of the answer.",
+        "If deterministic support hints include Fluent Forms code evidence, keep the answer about Fluent Forms. Do not mention Paymattic for that Fluent Forms answer unless the user explicitly asks about Paymattic.",
         "If a relevant official docs link was found with search_doc_links, include it under 'Documentation:' as a clickable link. Prefer search_doc_links URLs over older copied docs. Skip documentation links when the match is weak.",
         "If the answer includes a product documentation URL, it must be a URL returned by search_doc_links when that tool has a matching result. Do not use copied-doc legacy URLs as the final Documentation link.",
         "Do not include internal file-search citation markers such as 【...】 in the final answer.",
@@ -129,7 +153,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
   }
 
   return {
-    text: response.output_text || "",
+    text: sanitizeAgentText(response.output_text || "", input),
     responseId: response.id,
   };
 }
@@ -138,6 +162,14 @@ function emitActivity(activity, type, message, detail = "") {
   if (typeof activity === "function") {
     activity(type, message, detail);
   }
+}
+
+function hasMultipleQuestions(input) {
+  const text = String(input || "").trim();
+  if (!text) return false;
+  const questionMarks = (text.match(/\?/g) || []).length;
+  const nonEmptyLines = text.split(/\n+/).filter((line) => line.trim()).length;
+  return questionMarks > 1 || nonEmptyLines > 2;
 }
 
 function buildDocLinkHints(config, input) {
@@ -162,6 +194,65 @@ function buildDocLinkHints(config, input) {
     ...links.map((link) => `- ${link.product}: ${link.title} => ${link.url}`),
     "Use these candidates for the final Documentation link when one matches the answer. Do not invent or rewrite these URLs.",
   ].join("\n");
+}
+
+function buildDeterministicSupportHints(config, input, activity) {
+  const text = String(input || "");
+  const hints = [];
+
+  if (/\b(non[\s-]?profit|not[\s-]?for[\s-]?profit|charity|charitable|ngo)\b/i.test(text) && /\b(discounts?|pricing|price|offers?)\b/i.test(text)) {
+    emitActivity(activity, "docs", "Matched non-profit discount saved reply");
+    hints.push([
+      "Matched golden-answer saved reply for non-profit discount:",
+      "Source: docs/golden-answers/wpmanageninja-account-billing-saved-replies.md",
+      "Use this for the non-profit/not-for-profit discount question:",
+      "Hello {{customer.first_name}},",
+      "We provide a 50% discount to our non-profit clients.",
+      "Please apply from the following URL: https://wpmanageninja.com/discount-for-nonprofits/",
+      "You need to submit the form from the organization's official email address.",
+      "Thank you",
+    ].join("\n"));
+  }
+
+  if (/fluent\s*forms?/i.test(text) && /stripe/i.test(text) && /\b(two|multiple|different|separate|donation|donations|purchase|purchases|accounts?)\b/i.test(text)) {
+    emitActivity(activity, "files", "Matched Fluent Forms Stripe account code evidence");
+    hints.push([
+      "Matched Fluent Forms Stripe account code evidence:",
+      "Source: fluentform/app/Modules/Payments/PaymentMethods/Stripe/StripeSettings.php",
+      "The inspected code supports form-specific custom Stripe configuration. getSecretKey($formId), getPublishableKey($formId), and isLive($formId) first read the form payment settings; when stripe_account_type is custom, they use stripe_custom_config.secret_key, stripe_custom_config.publishable_key, and stripe_custom_config.payment_mode for that specific form. Otherwise, they fall back to the global Stripe settings.",
+      "Answer implication: Different forms can use different Stripe accounts by configuring custom Stripe credentials per form. For example, one donation form can use the donation Stripe account and one purchase form can use the purchase Stripe account. Do not claim Fluent Forms only supports one Stripe account globally when this code evidence is present.",
+      "Do not mention Paymattic as the source or say this is a Paymattic-only feature. This hint is from Fluent Forms code.",
+      "Documentation link to include when useful: https://fluentforms.com/docs/how-to-integrate-stripe-with-fluent-forms/",
+      "Caveat: Routing to different Stripe accounts inside the same single form based on a selected option is a different requirement and may need separate forms or custom logic.",
+    ].join("\n"));
+  }
+
+  if (!hints.length) {
+    return "Deterministic support hints: none";
+  }
+
+  return [
+    "Deterministic support hints from local saved replies/code:",
+    ...hints,
+    "Use these hints as higher priority than broad vector-memory guesses.",
+  ].join("\n\n");
+}
+
+function sanitizeAgentText(text, input) {
+  let value = String(text || "").replace(/【[^】]+】/g, "").trim();
+  const askedFluentForms = /fluent\s*forms?/i.test(String(input || ""));
+  const askedPaymattic = /paymattic/i.test(String(input || ""));
+
+  if (askedFluentForms && !askedPaymattic) {
+    value = value
+      .split("\n")
+      .filter((line) => !/paymattic/i.test(line))
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  return value;
 }
 
 function buildUserInput(input, images = []) {
