@@ -48,7 +48,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       "For mixed product + account questions, use product documentation/code for the product question and use golden-answer saved replies for account/policy questions. Example: a Fluent Forms Stripe feature question must be checked against Fluent Forms docs/code, while a non-profit discount question must use the WPManageNinja non-profit saved reply.",
       "For account/policy questions about non-profit/not-for-profit discounts, refunds, trials, renewals, invoices, billing address, licenses, upgrades, downgrades, password reset, or payment method updates, search_docs in 'golden-answers' first and adapt the matching saved reply. These questions are company policy questions, not product feature questions.",
       "When deterministic support hints say a golden-answer saved reply matched, you must use that saved reply. Do not say the information was not found in product docs, because product docs are not the source for company policy answers.",
-      "For trial/demo/try-before-buying questions, use the refund/trial saved reply. Do not only explain installation steps or say the customer must purchase without mentioning the 14-day refund policy.",
+      "For trial/demo/try-before-buying questions, use the refund/trial saved reply. Do not only explain installation steps or say the customer must purchase without mentioning the 14-day refund policy. Do not treat troubleshooting words like 'test this form', 'testing in incognito', or 'try this fix' as refund/trial intent.",
       "When deterministic support hints include product-specific code evidence, use that product evidence directly. Do not cite or recommend another product for that same answer unless the primary product evidence says the feature is unavailable.",
       "If deterministic support hints include Fluent Forms Stripe code evidence, answer as Fluent Forms evidence. Do not say the feature is Paymattic-only, do not cite Paymattic as the source, and ignore conflicting vector-memory results from other products for that Fluent Forms answer.",
       "Do not hardcode Fluent Support as the primary plugin. Fluent Support is only one example. The primary plugin might be FluentCRM, Bit File Manager, Live Chat for Fluent Support, My Shop Loyalty System, Plugin Check, WP Debug Hub, or any other installed plugin.",
@@ -217,7 +217,7 @@ function buildDeterministicSupportHints(config, input, activity) {
     ].join("\n"));
   }
 
-  if (/\b(try|trial|demo|test|evaluate|before\s+buying|before\s+purchase|money[\s-]?back|refund)\b/i.test(text) && /\b(pro|plugin|product|license|ninja\s*tables?|fluent|wpmanageninja)\b/i.test(text)) {
+  if (isTrialRefundPolicyQuestion(text)) {
     emitActivity(activity, "docs", "Matched refund and trial-period saved reply");
     hints.push([
       "Matched golden-answer saved reply for refund policy and trial period:",
@@ -278,8 +278,18 @@ function sanitizeAgentText(text, input) {
 
 function isTrialRefundPolicyQuestion(input) {
   const text = String(input || "");
-  return /\b(try|trial|demo|test|evaluate|before\s+buying|before\s+purchase|money[\s-]?back|refund)\b/i.test(text) &&
-    /\b(pro|plugin|product|license|ninja\s*tables?|fluent|wpmanageninja)\b/i.test(text);
+  const troubleshootingContext = /\b(fix|issue|problem|error|message|disabled|spamming|javascript|incognito|private\s+browser|form|submit|submission|field|captcha|turnstile|recaptcha)\b/i.test(text);
+
+  if (troubleshootingContext && /\b(test|testing|try|trying)\b/i.test(text)) {
+    return /\b(trial|demo|refund|money[\s-]?back|before\s+buying|before\s+purchase)\b/i.test(text);
+  }
+
+  if (/\b(trial|demo|refund|money[\s-]?back|before\s+buying|before\s+purchase)\b/i.test(text)) {
+    return /\b(pro|plugin|product|license|ninja\s*tables?|fluent|wpmanageninja)\b/i.test(text);
+  }
+
+  return /\b(try|trying|test|testing|evaluate|evaluating)\b/i.test(text) &&
+    /\b(pro|paid|premium|license|purchase|buy|buying|before\s+buying|before\s+purchase|ninja\s*tables?\s*pro|fluent\s*\w+\s*pro)\b/i.test(text);
 }
 
 function buildTrialRefundSavedReply(input) {
