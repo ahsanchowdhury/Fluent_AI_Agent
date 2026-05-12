@@ -424,6 +424,7 @@ function addThinkingMessage(label = "Thinking") {
 }
 
 function setMessageText(row, text) {
+  row.dataset.finalized = "true";
   removeActivityPanel(row);
   renderMessageBody(row.querySelector(".body"), text);
   const messageId = row.dataset.messageId;
@@ -482,7 +483,7 @@ function stopActivityPolling() {
 }
 
 async function refreshActivity(requestId, row) {
-  if (!requestId || !row?.isConnected) return;
+  if (!requestId || !row?.isConnected || row.dataset.finalized === "true") return;
   try {
     const session = await fetchJson(`/api/chat/activity/${encodeURIComponent(requestId)}`);
     renderActivity(row, session.events || [], session.finished === true);
