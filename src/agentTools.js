@@ -13,7 +13,7 @@ import {
   wpCliPluginList,
 } from "./tools/wordpress.js";
 import { debugPage, inspectInteractivePage, testFormPage } from "./tools/browser.js";
-import { listQaRecipes, runQaRecipe } from "./tools/qaRunner.js";
+import { listQaRecipes, runPluginQaSmoke, runQaRecipe } from "./tools/qaRunner.js";
 
 const MAX_TOOL_OUTPUT_CHARS = 70000;
 
@@ -335,6 +335,29 @@ export const agentTools = [
       additionalProperties: false,
     },
   },
+  {
+    type: "function",
+    name: "run_plugin_qa_smoke",
+    description:
+      "Run a generic low-risk QA smoke test for an installed WordPress plugin. It logs into WP Admin, detects the plugin's admin menu/page, opens it, captures screenshots, checks console/page/network errors, and samples a few safe related admin links. Use this when the user asks to QA test, beta test, smoke test, or check a plugin without naming a specific recipe.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        plugin: {
+          type: "string",
+          description:
+            "Plugin name or partial name, for example 'Fluent Forms', 'Ninja Tables', or 'FluentCRM'.",
+        },
+        maxLinks: {
+          type: "number",
+          description: "Maximum number of safe related admin links to sample. Defaults to 3.",
+        },
+      },
+      required: ["plugin", "maxLinks"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export async function runAgentTool(config, toolCall, options = {}) {
@@ -471,6 +494,16 @@ export async function runAgentTool(config, toolCall, options = {}) {
       emitActivity(activity, "test", `Running QA recipe ${args.recipeId}`);
       const result = await runQaRecipe(config, {
         recipeId: args.recipeId,
+        activity,
+      });
+      return toolResult(true, addQaReportUrls(result));
+    }
+
+    if (toolCall.name === "run_plugin_qa_smoke") {
+      emitActivity(activity, "test", `Running generic plugin QA for ${args.plugin}`);
+      const result = await runPluginQaSmoke(config, {
+        plugin: args.plugin || "",
+        maxLinks: args.maxLinks || 3,
         activity,
       });
       return toolResult(true, addQaReportUrls(result));
