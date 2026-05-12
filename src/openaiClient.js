@@ -23,12 +23,14 @@ export async function createAgentResponse(client, { input, config, previousRespo
   if (hasMultipleQuestions(input)) {
     emitActivity(activity, "ai", "Splitting the message into separate questions");
   }
+  emitActivity(activity, "ai", "Classifying request intent");
+  const supportIntent = await classifySupportIntent(client, { input, config, images });
   const tools = buildTools(config);
   emitActivity(activity, "wordpress", "Reading current WordPress site facts");
   const siteFacts = await buildSiteFacts(config);
   emitActivity(activity, "docs", "Checking official documentation link index");
   const docLinkHints = buildDocLinkHints(config, input);
-  const deterministicHints = buildDeterministicSupportHints(config, input, activity);
+  const deterministicHints = buildDeterministicSupportHints(input, supportIntent, activity);
   if (config.openaiVectorStoreId) {
     emitActivity(activity, "memory", "Code and docs vector memory is available");
   }
@@ -44,6 +46,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
         : "No vector store code memory is configured yet. Use local read-only tools instead.",
       "You may also read WordPress site facts, the WordPress debug log, lint PHP files, check WP-CLI plugin status, and visit the local site with a headless browser.",
       "For client-style feature questions, act like a careful support agent: first search_docs in 'golden-answers' for a matching saved reply, then identify the product, then use search_doc_links for a relevant official documentation URL for that product, then verify the requested feature in product docs/code/files as needed.",
+      "Use the structured request intent below to choose sources. Do not choose a saved reply from isolated keywords. A saved reply is appropriate only when the intent classification says the message is an account/policy question or contains a separate account/policy sub-question.",
       "If the user asks multiple questions in one message, split them and answer each question separately. Do not let a product prefix on one question control unrelated account, billing, discount, refund, license, invoice, or subscription questions.",
       "For mixed product + account questions, use product documentation/code for the product question and use golden-answer saved replies for account/policy questions. Example: a Fluent Forms Stripe feature question must be checked against Fluent Forms docs/code, while a non-profit discount question must use the WPManageNinja non-profit saved reply.",
       "For account/policy questions about non-profit/not-for-profit discounts, refunds, trials, renewals, invoices, billing address, licenses, upgrades, downgrades, password reset, or payment method updates, search_docs in 'golden-answers' first and adapt the matching saved reply. These questions are company policy questions, not product feature questions.",
@@ -91,6 +94,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       `Configured local site URL: ${config.localSiteUrl}`,
       `Configured WP debug log: ${config.wpDebugLog}`,
       siteFacts,
+      formatSupportIntentForInstructions(supportIntent),
       docLinkHints,
       deterministicHints,
     ].join("\n"),
@@ -130,6 +134,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
       instructions: [
         "You are a local WordPress support agent and plugin debugging assistant.",
         "Continue answering using the read-only diagnostic and search tool results provided.",
+        formatSupportIntentForInstructions(supportIntent),
         "If the original user message contains multiple questions, answer each one separately with the correct source. Product questions use product docs/code; account, billing, discount, refund, license, invoice, renewal, and policy questions use golden-answer saved replies when matched.",
         "For support questions, state which primary plugin you verified first, then any workaround found in other installed plugins.",
         "If a matching golden answer was found with search_docs/read_doc, adapt that saved reply and do not add unrelated developer/API details.",
@@ -156,7 +161,7 @@ export async function createAgentResponse(client, { input, config, previousRespo
   }
 
   return {
-    text: sanitizeAgentText(response.output_text || "", input),
+    text: sanitizeAgentText(response.output_text || "", input, supportIntent),
     responseId: response.id,
   };
 }
@@ -199,11 +204,138 @@ function buildDocLinkHints(config, input) {
   ].join("\n");
 }
 
-function buildDeterministicSupportHints(config, input, activity) {
+export async function classifySupportIntent(client, { input, config, images = [] }) {
+  const fallback = {
+    primary_intent: "unknown",
+    confidence: 0,
+    products: [],
+    should_use_saved_reply: false,
+    saved_reply_topic: "none",
+    needs_docs: true,
+    needs_code: false,
+    needs_browser_debug: false,
+    needs_image_analysis: images.length > 0,
+    sub_questions: [],
+    reasoning: "Classifier unavailable; default to docs/code search instead of forced saved reply.",
+  };
+
+  try {
+    const result = await client.responses.create({
+      model: config.openaiModel,
+      instructions: [
+        "Classify a WordPress support-agent request into routing intent.",
+        "Return only valid JSON. Do not include markdown.",
+        "The classifier must understand meaning, not isolated keywords.",
+        "Do not classify troubleshooting/testing language as trial/refund. Examples: 'test this form', 'testing in incognito', 'try this fix', and 'test like a user' are troubleshooting or debugging unless the customer asks about buying, demo, refund, or trial policy.",
+        "Use saved replies only for account/company policy topics: refund, trial/demo before buying, non-profit discount, license, renewal, invoice, billing, payment method, password/account, affiliate payout, office/VAT.",
+        "For product errors, spam protection, JavaScript disabled, form submission, browser/incognito, screenshots, frontend UI, plugin settings, feature behavior, import/export, or CSS, choose product_troubleshooting, product_feature, or browser_debug instead of account_policy.",
+      ].join("\n"),
+      input: [
+        "Classify this message for retrieval routing.",
+        "",
+        `Attached images: ${images.length}`,
+        "",
+        "Allowed primary_intent values:",
+        "- account_policy",
+        "- product_feature",
+        "- product_troubleshooting",
+        "- browser_debug",
+        "- wordpress_action",
+        "- code_question",
+        "- mixed",
+        "- general",
+        "- unknown",
+        "",
+        "Allowed saved_reply_topic values:",
+        "- none",
+        "- refund_trial",
+        "- non_profit_discount",
+        "- license",
+        "- renewal",
+        "- invoice_billing",
+        "- payment_method",
+        "- account_password",
+        "- affiliate",
+        "- office_vat",
+        "- other_policy",
+        "",
+        "Return this exact JSON shape:",
+        JSON.stringify(fallback, null, 2),
+        "",
+        "User message:",
+        String(input || ""),
+      ].join("\n"),
+    });
+
+    return normalizeSupportIntent(parseJsonObject(result.output_text), fallback);
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function parseJsonObject(value) {
+  const text = String(value || "").trim();
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonText = fenced ? fenced[1].trim() : text;
+  return JSON.parse(jsonText);
+}
+
+function normalizeSupportIntent(intent, fallback) {
+  const allowedIntents = new Set([
+    "account_policy",
+    "product_feature",
+    "product_troubleshooting",
+    "browser_debug",
+    "wordpress_action",
+    "code_question",
+    "mixed",
+    "general",
+    "unknown",
+  ]);
+  const allowedTopics = new Set([
+    "none",
+    "refund_trial",
+    "non_profit_discount",
+    "license",
+    "renewal",
+    "invoice_billing",
+    "payment_method",
+    "account_password",
+    "affiliate",
+    "office_vat",
+    "other_policy",
+  ]);
+  const normalized = { ...fallback, ...(intent && typeof intent === "object" ? intent : {}) };
+
+  if (!allowedIntents.has(normalized.primary_intent)) normalized.primary_intent = "unknown";
+  if (!allowedTopics.has(normalized.saved_reply_topic)) normalized.saved_reply_topic = "none";
+
+  normalized.confidence = Math.max(0, Math.min(1, Number(normalized.confidence) || 0));
+  normalized.products = Array.isArray(normalized.products) ? normalized.products.map(String).filter(Boolean).slice(0, 6) : [];
+  normalized.sub_questions = Array.isArray(normalized.sub_questions) ? normalized.sub_questions.slice(0, 8) : [];
+  normalized.should_use_saved_reply = normalized.should_use_saved_reply === true;
+  normalized.needs_docs = normalized.needs_docs !== false;
+  normalized.needs_code = normalized.needs_code === true;
+  normalized.needs_browser_debug = normalized.needs_browser_debug === true;
+  normalized.needs_image_analysis = normalized.needs_image_analysis === true;
+  normalized.reasoning = String(normalized.reasoning || "").slice(0, 500);
+
+  return normalized;
+}
+
+function formatSupportIntentForInstructions(intent) {
+  return [
+    "Structured request intent:",
+    JSON.stringify(intent, null, 2),
+    "Routing rule: if primary_intent is product_troubleshooting, browser_debug, product_feature, code_question, or general, do not answer from a policy saved reply unless a sub_question specifically asks an account/policy question.",
+  ].join("\n");
+}
+
+function buildDeterministicSupportHints(input, supportIntent, activity) {
   const text = String(input || "");
   const hints = [];
 
-  if (/\b(non[\s-]?profit|not[\s-]?for[\s-]?profit|charity|charitable|ngo)\b/i.test(text) && /\b(discounts?|pricing|price|offers?)\b/i.test(text)) {
+  if (shouldUseSavedReplyTopic(supportIntent, "non_profit_discount")) {
     emitActivity(activity, "docs", "Matched non-profit discount saved reply");
     hints.push([
       "Matched golden-answer saved reply for non-profit discount:",
@@ -217,7 +349,7 @@ function buildDeterministicSupportHints(config, input, activity) {
     ].join("\n"));
   }
 
-  if (isTrialRefundPolicyQuestion(text)) {
+  if (shouldUseSavedReplyTopic(supportIntent, "refund_trial")) {
     emitActivity(activity, "docs", "Matched refund and trial-period saved reply");
     hints.push([
       "Matched golden-answer saved reply for refund policy and trial period:",
@@ -245,7 +377,7 @@ function buildDeterministicSupportHints(config, input, activity) {
   }
 
   if (!hints.length) {
-    return "Deterministic support hints: none";
+    return "Deterministic support hints: none. No saved reply was forced by intent classification.";
   }
 
   return [
@@ -255,8 +387,16 @@ function buildDeterministicSupportHints(config, input, activity) {
   ].join("\n\n");
 }
 
-function sanitizeAgentText(text, input) {
-  if (isTrialRefundPolicyQuestion(input)) {
+function shouldUseSavedReplyTopic(intent, topic) {
+  if (!intent || intent.saved_reply_topic !== topic || intent.should_use_saved_reply !== true) {
+    return false;
+  }
+
+  return intent.primary_intent === "account_policy" || intent.primary_intent === "mixed";
+}
+
+function sanitizeAgentText(text, input, supportIntent = null) {
+  if (shouldUseSavedReplyTopic(supportIntent, "refund_trial") && supportIntent.confidence >= 0.72) {
     return buildTrialRefundSavedReply(input);
   }
 
@@ -274,22 +414,6 @@ function sanitizeAgentText(text, input) {
   }
 
   return value;
-}
-
-function isTrialRefundPolicyQuestion(input) {
-  const text = String(input || "");
-  const troubleshootingContext = /\b(fix|issue|problem|error|message|disabled|spamming|javascript|incognito|private\s+browser|form|submit|submission|field|captcha|turnstile|recaptcha)\b/i.test(text);
-
-  if (troubleshootingContext && /\b(test|testing|try|trying)\b/i.test(text)) {
-    return /\b(trial|demo|refund|money[\s-]?back|before\s+buying|before\s+purchase)\b/i.test(text);
-  }
-
-  if (/\b(trial|demo|refund|money[\s-]?back|before\s+buying|before\s+purchase)\b/i.test(text)) {
-    return /\b(pro|plugin|product|license|ninja\s*tables?|fluent|wpmanageninja)\b/i.test(text);
-  }
-
-  return /\b(try|trying|test|testing|evaluate|evaluating)\b/i.test(text) &&
-    /\b(pro|paid|premium|license|purchase|buy|buying|before\s+buying|before\s+purchase|ninja\s*tables?\s*pro|fluent\s*\w+\s*pro)\b/i.test(text);
 }
 
 function buildTrialRefundSavedReply(input) {
