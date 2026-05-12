@@ -418,13 +418,8 @@ function appendMessage(messageData) {
 function addThinkingMessage(label = "Thinking") {
   const row = addMessage("assistant", "");
   row.querySelector(".body").innerHTML = `${escapeHtml(label)} <span class="typing"><span></span><span></span><span></span></span>`;
-  const activity = document.createElement("div");
-  activity.className = "activity-panel";
-  activity.innerHTML = `
-    <div class="activity-title">Working steps</div>
-    <ol class="activity-list"></ol>
-  `;
-  row.querySelector(".message").append(activity);
+  ensureActivityPanel(row);
+  renderActivity(row, [{ type: "start", message: "Starting request" }], false);
   return row;
 }
 
@@ -474,6 +469,7 @@ function setBusy(isBusy) {
 
 function startActivityPolling(requestId, row) {
   stopActivityPolling();
+  renderActivity(row, [{ type: "start", message: "Starting request" }], false);
   refreshActivity(requestId, row);
   activityPoll = window.setInterval(() => refreshActivity(requestId, row), 900);
 }
@@ -496,12 +492,11 @@ async function refreshActivity(requestId, row) {
 }
 
 function renderActivity(row, events, finished) {
-  const panel = row.querySelector(".activity-panel");
-  if (!panel) return;
+  const panel = ensureActivityPanel(row);
 
   const list = panel.querySelector(".activity-list");
   list.innerHTML = "";
-  const visibleEvents = events.slice(-18);
+  const visibleEvents = events.length ? events.slice(-18) : [{ type: "start", message: "Starting request" }];
 
   for (const [index, event] of visibleEvents.entries()) {
     const item = document.createElement("li");
@@ -526,6 +521,22 @@ function renderActivity(row, events, finished) {
   }
 
   messages.scrollTop = messages.scrollHeight;
+}
+
+function ensureActivityPanel(row) {
+  let panel = row.querySelector(".activity-panel");
+  if (panel) {
+    return panel;
+  }
+
+  panel = document.createElement("div");
+  panel.className = "activity-panel";
+  panel.innerHTML = `
+    <div class="activity-title">Working steps</div>
+    <ol class="activity-list"></ol>
+  `;
+  row.querySelector(".message")?.append(panel);
+  return panel;
 }
 
 async function runComposerAction(action) {
