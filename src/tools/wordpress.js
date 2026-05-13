@@ -345,6 +345,135 @@ export function createWordPressContent(config, options = {}) {
   return runWordPressJson(config, wpRoot, phpCode);
 }
 
+export function createFluentSupportTicket(config, options = {}) {
+  const customerName = String(options.customerName || "").trim();
+  const customerEmail = String(options.customerEmail || "").trim();
+  const subject = String(options.subject || "").trim();
+  const content = String(options.content || "").trim();
+  const priority = String(options.priority || "normal").trim().toLowerCase();
+  const mailbox = String(options.mailbox || "").trim();
+
+  if (!customerEmail) {
+    return Promise.resolve({ ok: false, message: "Customer email is required." });
+  }
+
+  if (!subject) {
+    return Promise.resolve({ ok: false, message: "Ticket subject is required." });
+  }
+
+  if (!content) {
+    return Promise.resolve({ ok: false, message: "Ticket message is required." });
+  }
+
+  if (!["low", "normal", "medium", "high", "critical"].includes(priority)) {
+    return Promise.resolve({ ok: false, message: `Unsupported ticket priority: ${priority}` });
+  }
+
+  const wpRoot = getWordPressRoot(config.pluginRoot);
+  const phpCode = `
+    require ${JSON.stringify(path.join(wpRoot, "wp-load.php"))};
+
+    if (!defined('FLUENT_SUPPORT_VERSION') && !class_exists('FluentSupport\\\\App\\\\Models\\\\Ticket')) {
+      echo wp_json_encode(array('ok' => false, 'message' => 'Fluent Support is not active or not loaded.'));
+      exit;
+    }
+
+    if (${JSON.stringify(config.wpAdminUser || "")}) {
+      $user = get_user_by('login', ${JSON.stringify(config.wpAdminUser || "")});
+      if (!$user && is_email(${JSON.stringify(config.wpAdminUser || "")})) {
+        $user = get_user_by('email', ${JSON.stringify(config.wpAdminUser || "")});
+      }
+      if ($user) {
+        wp_set_current_user($user->ID);
+      }
+    }
+
+    $customer_name = sanitize_text_field(${JSON.stringify(customerName)});
+    $customer_email = sanitize_email(${JSON.stringify(customerEmail)});
+    $subject = sanitize_text_field(${JSON.stringify(subject)});
+    $content = wp_kses_post(${JSON.stringify(content)});
+    $priority = sanitize_text_field(${JSON.stringify(priority)});
+    $mailbox_query = sanitize_text_field(${JSON.stringify(mailbox)});
+
+    if (!$customer_email || !is_email($customer_email)) {
+      echo wp_json_encode(array('ok' => false, 'message' => 'A valid customer email is required.'));
+      exit;
+    }
+
+    if (!$subject || !$content) {
+      echo wp_json_encode(array('ok' => false, 'message' => 'Ticket subject and message are required.'));
+      exit;
+    }
+
+    $name_parts = preg_split('/\\s+/', trim($customer_name), 2);
+    $customer_data = array(
+      'email' => $customer_email,
+      'first_name' => $name_parts[0] ?? '',
+      'last_name' => $name_parts[1] ?? '',
+    );
+
+    try {
+      $customer = \\FluentSupport\\App\\Models\\Customer::maybeCreateCustomer($customer_data);
+      if (!$customer) {
+        echo wp_json_encode(array('ok' => false, 'message' => 'Customer could not be created.'));
+        exit;
+      }
+
+      $ticket_data = array(
+        'customer_id' => $customer->id,
+        'title' => $subject,
+        'content' => $content,
+        'priority' => $priority === 'medium' ? 'normal' : $priority,
+        'client_priority' => $priority === 'medium' ? 'normal' : $priority,
+        'status' => 'new',
+        'source' => 'local_ai_agent',
+      );
+
+      if ($mailbox_query) {
+        $mailbox = null;
+        if (is_numeric($mailbox_query)) {
+          $mailbox = \\FluentSupport\\App\\Models\\MailBox::find($mailbox_query);
+        }
+        if (!$mailbox) {
+          $mailbox = \\FluentSupport\\App\\Models\\MailBox::where('name', 'LIKE', '%' . $mailbox_query . '%')
+            ->orWhere('email', 'LIKE', '%' . $mailbox_query . '%')
+            ->orWhere('slug', 'LIKE', '%' . sanitize_title($mailbox_query) . '%')
+            ->first();
+        }
+        if (!$mailbox) {
+          echo wp_json_encode(array('ok' => false, 'message' => 'Mailbox not found: ' . $mailbox_query));
+          exit;
+        }
+        $ticket_data['mailbox_id'] = $mailbox->id;
+      }
+
+      add_filter('fluent_support/should_send_notification', '__return_false', 999);
+      $ticket = (new \\FluentSupport\\App\\Services\\Tickets\\TicketService())->storeTicket($ticket_data, $customer);
+
+      $admin_url = admin_url('admin.php?page=fluent-support#/tickets/' . $ticket->id . '/view');
+      echo wp_json_encode(array(
+        'ok' => true,
+        'action' => 'create_fluent_support_ticket',
+        'id' => (int) $ticket->id,
+        'title' => $ticket->title,
+        'status' => $ticket->status,
+        'priority' => $ticket->priority,
+        'customer' => array(
+          'id' => (int) $customer->id,
+          'name' => trim($customer->first_name . ' ' . $customer->last_name),
+          'email' => $customer->email,
+        ),
+        'ticketUrl' => $admin_url,
+        'notificationsSuppressed' => true,
+      ));
+    } catch (\\Throwable $e) {
+      echo wp_json_encode(array('ok' => false, 'message' => $e->getMessage()));
+    }
+  `;
+
+  return runWordPressJson(config, wpRoot, phpCode);
+}
+
 export async function installWordPressOrgPlugin(config, query, options = {}) {
   const pluginQuery = String(query || "").trim();
   if (!pluginQuery) {

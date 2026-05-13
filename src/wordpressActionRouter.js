@@ -2,6 +2,7 @@ import {
   activateTheme,
   changeAllPluginsStatus,
   changePluginStatus,
+  createFluentSupportTicket,
   createWordPressContent,
   getWordPressSiteSummary,
   installWordPressOrgPlugin,
@@ -16,6 +17,16 @@ export async function detectWordPressAction(config, message, options = {}) {
   const pendingContentAction = detectPendingContentAction(message, normalized, options);
   if (pendingContentAction) {
     return pendingContentAction;
+  }
+
+  const pendingTicketAction = detectPendingTicketAction(message, normalized, options);
+  if (pendingTicketAction) {
+    return pendingTicketAction;
+  }
+
+  const ticketAction = detectCreateFluentSupportTicketAction(message, normalized);
+  if (ticketAction) {
+    return ticketAction;
   }
 
   const contentAction = detectCreateContentAction(message, normalized);
@@ -155,6 +166,19 @@ export async function executeWordPressAction(config, action) {
     };
   }
 
+  if (action.type === "ticket_prompt") {
+    return {
+      ok: true,
+      action: "ticket_prompt",
+      pendingTicket: action.pendingTicket,
+      message: formatTicketPrompt(action.pendingTicket),
+    };
+  }
+
+  if (action.type === "create_fluent_support_ticket") {
+    return createFluentSupportTicket(config, action);
+  }
+
   if (action.type === "create_content") {
     return createWordPressContent(config, action);
   }
@@ -236,6 +260,17 @@ export function formatActionResult(result) {
     ].filter(Boolean).join("\n");
   }
 
+  if (result.action === "create_fluent_support_ticket") {
+    return [
+      `Done. Created Fluent Support ticket: ${result.title}`,
+      `Ticket ID: #${result.id}`,
+      `Status: ${result.status}`,
+      `Customer: ${result.customer?.name || result.customer?.email || ""}`,
+      `Open ticket: [#${result.id}](${result.ticketUrl})`,
+      result.notificationsSuppressed ? "Note: email notifications were suppressed for this local agent action." : "",
+    ].filter(Boolean).join("\n");
+  }
+
   if (result.theme) {
     return `Done. The active theme is now ${result.theme}.`;
   }
@@ -262,6 +297,39 @@ export function rememberWordPressAction(context, conversationId, action, result)
     context.set(conversationId, {
       ...previous,
       pendingContent: result.pendingContent,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
+  if (result.action === "ticket_prompt") {
+    const previous = context.get(conversationId) || {};
+    if (!result.pendingTicket) {
+      const { pendingTicket: _pendingTicket, ...rest } = previous;
+      context.set(conversationId, {
+        ...rest,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    context.set(conversationId, {
+      ...previous,
+      pendingTicket: result.pendingTicket,
+      updatedAt: Date.now(),
+    });
+    return;
+  }
+
+  if (action.type === "create_fluent_support_ticket") {
+    const previous = context.get(conversationId) || {};
+    const { pendingTicket: _pendingTicket, ...rest } = previous;
+    context.set(conversationId, {
+      ...rest,
+      type: "fluent_support_ticket",
+      ticketId: result.id,
+      title: result.title,
+      customerEmail: result.customer?.email || action.customerEmail,
       updatedAt: Date.now(),
     });
     return;
@@ -380,6 +448,182 @@ function isExplicitThemeManagementRequest(normalized) {
     /^(?:please\s+)?(?:activate|switch|change|set)\s+(?:theme\s+)?(?:to\s+)?[a-z0-9][a-z0-9 ]{1,80}$/.test(normalized) ||
     /\b(?:activate|switch|change|set)\s+theme\s+(?:to\s+)?[a-z0-9][a-z0-9 ]{1,80}$/.test(normalized)
   );
+}
+
+function detectPendingTicketAction(message, normalized, options) {
+  const pendingTicket = options.context?.get(options.conversationId)?.pendingTicket;
+  if (!pendingTicket) {
+    return null;
+  }
+
+  if (/\b(cancel|stop|never mind|nevermind)\b/.test(normalized)) {
+    return {
+      type: "ticket_prompt",
+      pendingTicket: null,
+      message: "Okay, cancelled the Fluent Support ticket creation request.",
+    };
+  }
+
+  const extracted = extractTicketDetails(message);
+  const next = {
+    ...pendingTicket,
+    ...Object.fromEntries(Object.entries(extracted).filter(([, value]) => value)),
+  };
+
+  if (!next.content && !extractedHasStructuredTicketFields(extracted) && !looksLikeTicketCommand(normalized)) {
+    next.content = String(message || "").trim();
+  } else if (!next.subject && next.content && !extracted.subject) {
+    next.subject = String(message || "").trim();
+  }
+
+  if (!hasRequiredTicketFields(next)) {
+    return {
+      type: "ticket_prompt",
+      pendingTicket: next,
+    };
+  }
+
+  return {
+    type: "create_fluent_support_ticket",
+    ...next,
+  };
+}
+
+function detectCreateFluentSupportTicketAction(message, normalized) {
+  if (isInformationalTicketQuestion(normalized)) {
+    return null;
+  }
+
+  if (!looksLikeTicketCommand(normalized)) {
+    return null;
+  }
+
+  const details = extractTicketDetails(message);
+  const pendingTicket = {
+    customerName: details.customerName || "",
+    customerEmail: details.customerEmail || "",
+    subject: details.subject || "",
+    content: details.content || "",
+    priority: details.priority || "normal",
+    mailbox: details.mailbox || "",
+  };
+
+  if (!hasRequiredTicketFields(pendingTicket)) {
+    return {
+      type: "ticket_prompt",
+      pendingTicket,
+    };
+  }
+
+  return {
+    type: "create_fluent_support_ticket",
+    ...pendingTicket,
+  };
+}
+
+function looksLikeTicketCommand(normalized) {
+  return (
+    /\b(?:create|make|add|open|submit|raise)\s+(?:(?:a|an|new)\s+)?(?:fluent\s*support\s+)?ticket\b/.test(normalized) ||
+    /\b(?:create|make|add|open|submit|raise)\s+(?:(?:a|an|new)\s+)?support\s+ticket\s+(?:in|on|with|using)\s+fluent\s*support\b/.test(normalized) ||
+    /\bfluent\s*support\b/.test(normalized) && /\b(?:create|make|add|open|submit|raise)\b/.test(normalized) && /\bticket\b/.test(normalized)
+  );
+}
+
+function isInformationalTicketQuestion(normalized) {
+  return (
+    /\b(how|what|when|where|why|which|can|could|should|would|is|are|do|does|did|example|explain|show|list|find|check|debug|fix|help)\b/.test(normalized) &&
+    !/\b(?:create|make|add|open|submit|raise)\s+(?:(?:a|an|new)\s+)?(?:fluent\s*support\s+)?ticket\b/.test(normalized)
+  );
+}
+
+function hasRequiredTicketFields(ticket) {
+  return Boolean(ticket?.customerEmail && ticket?.subject && ticket?.content);
+}
+
+function extractedHasStructuredTicketFields(details) {
+  return Boolean(details.customerName || details.customerEmail || details.subject || details.content || details.priority || details.mailbox);
+}
+
+function extractTicketDetails(message) {
+  const text = String(message || "").trim();
+  const customerName =
+    extractLabelValue(text, ["customer", "customer name", "name", "client", "client name"]) ||
+    "";
+  const customerEmail =
+    extractLabelValue(text, ["email", "customer email", "client email"]) ||
+    extractEmail(text) ||
+    "";
+  const subject =
+    extractLabelValue(text, ["subject", "ticket subject", "title", "ticket title"]) ||
+    extractQuotedTicketSubject(text) ||
+    "";
+  const content =
+    extractLabelValue(text, ["message", "ticket message", "content", "description", "body"]) ||
+    "";
+  const priority =
+    extractLabelValue(text, ["priority", "ticket priority"]) ||
+    extractPriority(text) ||
+    "";
+  const mailbox =
+    extractLabelValue(text, ["mailbox", "inbox", "business inbox"]) ||
+    "";
+
+  return {
+    customerName: cleanContentValue(customerName),
+    customerEmail: cleanContentValue(customerEmail),
+    subject: cleanContentValue(subject),
+    content: cleanContentValue(content),
+    priority: normalizeTicketPriority(priority),
+    mailbox: cleanContentValue(mailbox),
+  };
+}
+
+function extractEmail(text) {
+  const match = String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match?.[0] || "";
+}
+
+function extractQuotedTicketSubject(text) {
+  const match =
+    text.match(/\bticket\s+(?:called|named|title[d]?|subject)\s+["“]([^"”]+)["”]/i) ||
+    text.match(/\b(?:called|named|title[d]?|subject)\s+["“]([^"”]+)["”]/i);
+  return match?.[1] || "";
+}
+
+function extractPriority(text) {
+  const match = String(text || "").match(/\b(low|normal|medium|high|critical)\s+priority\b/i);
+  return match?.[1] || "";
+}
+
+function normalizeTicketPriority(value) {
+  const priority = String(value || "").toLowerCase().trim();
+  if (!priority) return "";
+  if (priority === "medium") return "normal";
+  if (["low", "normal", "high", "critical"].includes(priority)) return priority;
+  return priority;
+}
+
+function formatTicketPrompt(pendingTicket) {
+  if (!pendingTicket) {
+    return "Okay, cancelled the Fluent Support ticket creation request.";
+  }
+
+  const missing = [];
+  if (!pendingTicket.customerEmail) missing.push("customer email");
+  if (!pendingTicket.subject) missing.push("subject");
+  if (!pendingTicket.content) missing.push("message");
+
+  return [
+    "Sure. I can create a Fluent Support ticket.",
+    `Please send the ${missing.join(" and ")}.`,
+    "",
+    "You can reply like this:",
+    "Customer: John Doe",
+    "Email: john@example.com",
+    "Subject: License activation issue",
+    "Message: The customer cannot activate the license on their site.",
+    "Priority: Normal",
+  ].join("\n");
 }
 
 function detectPendingContentAction(message, normalized, options) {
@@ -524,9 +768,37 @@ function extractContentDetails(message) {
 }
 
 function extractLabelValue(text, labels) {
+  const stopLabels = [
+    "title",
+    "page title",
+    "post title",
+    "ticket title",
+    "subject",
+    "ticket subject",
+    "content",
+    "body",
+    "description",
+    "page content",
+    "post content",
+    "message",
+    "ticket message",
+    "customer",
+    "customer name",
+    "client",
+    "client name",
+    "email",
+    "customer email",
+    "client email",
+    "priority",
+    "ticket priority",
+    "mailbox",
+    "inbox",
+    "business inbox",
+  ];
+  const stopPattern = stopLabels.map(escapeRegExp).join("|");
   for (const label of labels) {
     const pattern = new RegExp(
-      `(?:^|\\n|\\b)${escapeRegExp(label)}\\s*[:=-]\\s*([\\s\\S]*?)(?=\\s+(?:title|content|body|description)\\s*[:=-]|$)`,
+      `(?:^|\\n|\\b)${escapeRegExp(label)}\\s*[:=-]\\s*([\\s\\S]*?)(?=\\s+(?:${stopPattern})\\s*[:=-]|$)`,
       "i"
     );
     const match = text.match(pattern);
