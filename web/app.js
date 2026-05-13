@@ -547,6 +547,14 @@ async function runComposerAction(action) {
     return;
   }
 
+  if (draft) {
+    input.value = "";
+    resizeInput();
+    addMessage("user", draft);
+    updateConversationTitle(draft);
+  }
+
+  const history = getActiveConversation().messages;
   const label = action === "rewrite" ? "Rewriting response" : "Summarising context";
   const pending = addThinkingMessage(label);
   setBusy(true);
@@ -555,7 +563,7 @@ async function runComposerAction(action) {
     const result = await postJson("/api/message-action", {
       action,
       text: draft,
-      history: getActiveConversation().messages,
+      history,
     });
     setMessageText(pending, result.text || "(No response)");
   } catch (error) {
