@@ -140,6 +140,7 @@ async function loadStatus() {
 }
 
 async function resetChat() {
+  await postJson("/api/reset", { conversationId: activeConversationId }).catch(() => {});
   activeConversationId = createConversation("New chat");
   saveConversations();
   renderConversations();
@@ -283,8 +284,12 @@ async function runQaScriptStep(item) {
   addMessage("system", `Running the next QA test for ${pluginName}...`);
   setBusy(true);
   try {
-    const result = await postJson("/api/qa/scripts/run-step", { plugin: pluginName });
+    const result = await postJson("/api/qa/scripts/run-step", {
+      plugin: pluginName,
+      conversationId: activeConversationId,
+    });
     addMessage("assistant", formatQaRunResult(result));
+    addMessage("system", `QA mode is now active for ${result.qaSession?.pluginName || pluginName}. Every prompt in this chat will be treated as testing context until you say "stop testing".`);
     await loadQaScripts();
   } catch (error) {
     addMessage("system", `QA test failed: ${error.message}`);

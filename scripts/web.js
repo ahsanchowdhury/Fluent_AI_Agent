@@ -28,6 +28,7 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const publicDir = path.resolve(dirname, "..", "web");
 const conversations = new Map();
 const conversationActionContext = new Map();
+const qaSessionContext = new Map();
 const activityStore = createActivityStore();
 
 app.use(express.json({ limit: "40mb" }));
@@ -172,7 +173,13 @@ app.post("/api/qa/scripts/run-step", async (request, response) => {
   try {
     const plugin = String(request.body?.plugin || "").trim();
     const testId = String(request.body?.testId || "").trim();
-    response.json(addGeneratedQaStepUrls(await runNextQaScriptStep(config, { plugin, testId })));
+    const conversationId = String(request.body?.conversationId || "default");
+    const result = addGeneratedQaStepUrls(await runNextQaScriptStep(config, { plugin, testId }));
+    rememberQaSession(conversationId, result);
+    response.json({
+      ...result,
+      qaSession: getQaSession(conversationId),
+    });
   } catch (error) {
     response.status(500).json({ error: error.message });
   }
@@ -239,27 +246,33 @@ app.post("/api/chat", async (request, response) => {
 
   try {
     activity("start", "Reading your request");
-    const qaContinuation = await maybeRunQaScriptFromChat(message, activity);
+    const qaContinuation = await maybeRunQaScriptFromChat(message, conversationId, activity);
     if (qaContinuation) {
-      activity("done", "QA step finished");
+      activity("done", qaContinuation.doneMessage || "QA step finished");
       activityStore.finish(requestId);
       response.json({ text: qaContinuation.text });
       return;
     }
 
-    const wordpressAction = await detectWordPressAction(config, message, {
-      conversationId,
-      context: conversationActionContext,
-      history,
-    });
-    if (wordpressAction) {
-      activity("wordpress", `Running WordPress action: ${wordpressAction.action}`);
-      const result = await executeWordPressAction(config, wordpressAction);
-      rememberWordPressAction(conversationActionContext, conversationId, wordpressAction, result);
-      activity("done", "WordPress action finished");
-      activityStore.finish(requestId);
-      response.json({ text: formatActionResult(result) });
-      return;
+    const activeQaSession = getQaSession(conversationId);
+
+    if (!activeQaSession) {
+      const wordpressAction = await detectWordPressAction(config, message, {
+        conversationId,
+        context: conversationActionContext,
+        history,
+      });
+      if (wordpressAction) {
+        activity("wordpress", `Running WordPress action: ${wordpressAction.action}`);
+        const result = await executeWordPressAction(config, wordpressAction);
+        rememberWordPressAction(conversationActionContext, conversationId, wordpressAction, result);
+        activity("done", "WordPress action finished");
+        activityStore.finish(requestId);
+        response.json({ text: formatActionResult(result) });
+        return;
+      }
+    } else {
+      activity("test", `QA mode active for ${activeQaSession.pluginName}`);
     }
 
     if (config.autoIndexOnChat) {
@@ -269,7 +282,7 @@ app.post("/api/chat", async (request, response) => {
 
     activity("ai", "Asking the model which tools it needs");
     const result = await createAgentResponse(client, {
-      input: message,
+      input: activeQaSession ? buildQaModeInput(activeQaSession, message) : message,
       config,
       previousResponseId: conversations.get(conversationId) || null,
       images,
@@ -329,6 +342,7 @@ app.post("/api/reset", (request, response) => {
   const conversationId = String(request.body?.conversationId || "default");
   conversations.delete(conversationId);
   conversationActionContext.delete(conversationId);
+  qaSessionContext.delete(conversationId);
   response.json({ ok: true });
 });
 
@@ -444,8 +458,19 @@ function addQaReportUrls(result) {
   };
 }
 
-async function maybeRunQaScriptFromChat(message, activity) {
-  const match = await matchQaContinuation(message);
+async function maybeRunQaScriptFromChat(message, conversationId, activity) {
+  const normalizedMessage = normalizeForMatch(message);
+  const activeSession = getQaSession(conversationId);
+
+  if (activeSession && isStopQaModeMessage(normalizedMessage)) {
+    qaSessionContext.delete(conversationId);
+    return {
+      doneMessage: "QA mode stopped",
+      text: `QA mode stopped for ${activeSession.pluginName}. Normal chat routing is active again.`,
+    };
+  }
+
+  const match = await matchQaContinuation(message, activeSession);
   if (!match) {
     return null;
   }
@@ -459,20 +484,25 @@ async function maybeRunQaScriptFromChat(message, activity) {
     testId: match.testId || "",
     activity,
   }));
+  rememberQaSession(conversationId, result);
 
   return {
     text: formatGeneratedQaRunResult(result),
   };
 }
 
-async function matchQaContinuation(message) {
+async function matchQaContinuation(message, activeSession = null) {
   const normalizedMessage = normalizeForMatch(message);
   if (!normalizedMessage) {
     return null;
   }
 
   if (/^(continue|next|run next|run the next test|continue qa|continue test)$/.test(normalizedMessage)) {
-    return { plugin: "", testId: "" };
+    return { plugin: activeSession?.pluginName || "", testId: "" };
+  }
+
+  if (activeSession?.nextTest && normalizeForMatch(activeSession.nextTest) === normalizedMessage) {
+    return { plugin: activeSession.pluginName, testId: "" };
   }
 
   let scripts;
@@ -497,6 +527,53 @@ async function matchQaContinuation(message) {
   }
 
   return null;
+}
+
+function rememberQaSession(conversationId, result) {
+  const pluginName = result?.script?.plugin?.name || result?.script?.plugin?.file || "";
+  if (!conversationId || !pluginName) {
+    return;
+  }
+
+  qaSessionContext.set(conversationId, {
+    mode: "qa_testing",
+    pluginName,
+    pluginFile: result.script?.plugin?.file || "",
+    nextTest: result.nextTest?.title || "",
+    lastTest: result.testCase?.title || "",
+    lastStatus: result.report?.status || "",
+    updatedAt: Date.now(),
+  });
+}
+
+function getQaSession(conversationId) {
+  const session = qaSessionContext.get(conversationId);
+  if (!session?.pluginName) {
+    return null;
+  }
+  return session;
+}
+
+function isStopQaModeMessage(normalizedMessage) {
+  return /^(stop testing|stop qa|exit qa|exit testing|end testing|end qa|normal chat|back to normal)$/.test(normalizedMessage);
+}
+
+function buildQaModeInput(session, message) {
+  return [
+    `QA mode is active for plugin: ${session.pluginName}.`,
+    session.pluginFile ? `Plugin file: ${session.pluginFile}.` : "",
+    session.lastTest ? `Last QA test: ${session.lastTest}.` : "",
+    session.lastStatus ? `Last QA status: ${session.lastStatus}.` : "",
+    session.nextTest ? `Next saved QA test: ${session.nextTest}.` : "There is no pending saved QA test, but QA mode remains active until the user says stop testing.",
+    "",
+    "Treat the user's message as related to QA/testing for this active plugin.",
+    "Do not perform normal WordPress actions like creating tickets, changing themes, activating plugins, or creating posts/pages while QA mode is active.",
+    "If the user asks to continue, run the next generated QA script step for the active plugin.",
+    "If the user asks for a specific check or test focus, answer as a QA tester for the active plugin and use available docs/code/browser tools when useful.",
+    "Remind the user they can say 'stop testing' to leave QA mode only when it is helpful.",
+    "",
+    `User message: ${message}`,
+  ].filter(Boolean).join("\n");
 }
 
 function formatGeneratedQaRunResult(result) {
