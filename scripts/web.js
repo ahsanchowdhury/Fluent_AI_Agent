@@ -239,6 +239,14 @@ app.post("/api/chat", async (request, response) => {
 
   try {
     activity("start", "Reading your request");
+    const qaContinuation = await maybeRunQaScriptFromChat(message, activity);
+    if (qaContinuation) {
+      activity("done", "QA step finished");
+      activityStore.finish(requestId);
+      response.json({ text: qaContinuation.text });
+      return;
+    }
+
     const wordpressAction = await detectWordPressAction(config, message, {
       conversationId,
       context: conversationActionContext,
@@ -431,6 +439,97 @@ function addQaReportUrls(result) {
       };
     }),
   };
+}
+
+async function maybeRunQaScriptFromChat(message, activity) {
+  const match = await matchQaContinuation(message);
+  if (!match) {
+    return null;
+  }
+
+  activity("test", match.plugin
+    ? `Continuing QA script for ${match.plugin}`
+    : "Continuing the most recent QA script");
+
+  const result = addGeneratedQaStepUrls(await runNextQaScriptStep(config, {
+    plugin: match.plugin,
+    testId: match.testId || "",
+    activity,
+  }));
+
+  return {
+    text: formatGeneratedQaRunResult(result),
+  };
+}
+
+async function matchQaContinuation(message) {
+  const normalizedMessage = normalizeForMatch(message);
+  if (!normalizedMessage) {
+    return null;
+  }
+
+  if (/^(continue|next|run next|run the next test|continue qa|continue test)$/.test(normalizedMessage)) {
+    return { plugin: "", testId: "" };
+  }
+
+  let scripts;
+  try {
+    scripts = await listQaScripts(config);
+  } catch (_error) {
+    return null;
+  }
+
+  for (const item of scripts.plugins || []) {
+    const nextTest = item.nextTest || "";
+    if (!nextTest || item.status === "Not ready") continue;
+
+    const normalizedNextTest = normalizeForMatch(nextTest);
+    const normalizedPlugin = normalizeForMatch(item.plugin?.name || item.plugin?.file || "");
+    const isExactNextTitle = normalizedMessage === normalizedNextTest;
+    const isRunNextForPlugin = normalizedMessage.includes("run next") && normalizedPlugin && normalizedMessage.includes(normalizedPlugin);
+
+    if (isExactNextTitle || isRunNextForPlugin) {
+      return { plugin: item.plugin?.name || item.plugin?.file || "", testId: "" };
+    }
+  }
+
+  return null;
+}
+
+function formatGeneratedQaRunResult(result) {
+  if (result.blocked) {
+    return [
+      `QA test is blocked for ${result.script?.plugin?.name || "this plugin"}.`,
+      "",
+      `Test: ${result.testCase?.title || "Unknown test"}`,
+      `Reason: ${result.reason || "This test requires confirmation."}`,
+    ].join("\n");
+  }
+
+  const report = result.report || {};
+  const screenshots = (report.screenshots || [])
+    .map((screenshot) => `- ${screenshot.screenshotMarkdown || screenshot.name || "Screenshot"}`)
+    .join("\n");
+
+  return [
+    `QA test completed for ${result.script?.plugin?.name || "plugin"}.`,
+    "",
+    `Test: ${result.testCase?.title || "Unknown test"}`,
+    `Status: ${report.status || "unknown"}`,
+    report.failure ? `Failure: ${report.failure}` : "",
+    report.reportMarkdown ? `Report: ${report.reportMarkdown}` : "",
+    screenshots ? `Screenshots:\n${screenshots}` : "",
+    result.nextTest?.title ? `Next recommended test: ${result.nextTest.title}` : "No more pending tests in this draft.",
+  ].filter(Boolean).join("\n");
+}
+
+function normalizeForMatch(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[–—]/g, "-")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function getManifestPath() {
