@@ -594,10 +594,28 @@ function formatGeneratedQaRunResult(result) {
     `Test: ${result.testCase?.title || "Unknown test"}`,
     `Status: ${report.status || "unknown"}`,
     report.failure ? `Failure: ${report.failure}` : "",
-    report.reportMarkdown ? `Report: ${report.reportMarkdown}` : "",
-    report.jsonReportMarkdown ? `JSON: ${report.jsonReportMarkdown}` : "",
+    formatReportLink(report),
+    formatJsonReportLink(report),
     result.nextTest?.title ? `Next recommended test: ${result.nextTest.title}` : "No more pending tests in this draft.",
   ].filter(Boolean).join("\n");
+}
+
+function formatReportLink(report) {
+  const link = report.reportMarkdown || markdownLink("Open full QA report", report.reportHtmlUrl || report.reportUrl || localFileUrl(report.reportHtmlPath || report.reportPath));
+  return link ? `Report: ${link}` : "Report: Not available";
+}
+
+function formatJsonReportLink(report) {
+  const link = report.jsonReportMarkdown || markdownLink("Open JSON report", report.reportUrl || localFileUrl(report.reportPath));
+  return link ? `JSON: ${link}` : "";
+}
+
+function markdownLink(label, url) {
+  return url ? `[${label}](${url})` : "";
+}
+
+function localFileUrl(filePath) {
+  return filePath ? `/api/local-file?path=${encodeURIComponent(filePath)}` : "";
 }
 
 function normalizeForMatch(value) {
