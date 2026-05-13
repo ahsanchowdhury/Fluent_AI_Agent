@@ -134,6 +134,7 @@ export async function runNextQaScriptStep(config, { plugin = "", testId = "", ac
     status: report.status,
     failure: report.failure || "",
     reportPath: report.reportPath,
+    reportHtmlPath: report.reportHtmlPath,
     screenshots: report.screenshots || [],
     ranAt: now,
   };

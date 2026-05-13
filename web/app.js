@@ -326,9 +326,6 @@ function formatQaRunResult(result) {
   }
 
   const report = result.report || {};
-  const screenshots = (report.screenshots || [])
-    .map((screenshot) => `- ${screenshot.screenshotMarkdown || screenshot.name || "Screenshot"}`)
-    .join("\n");
 
   return [
     `QA test completed for ${result.script?.plugin?.name || "plugin"}.`,
@@ -337,7 +334,7 @@ function formatQaRunResult(result) {
     `Status: ${report.status || "unknown"}`,
     report.failure ? `Failure: ${report.failure}` : "",
     report.reportMarkdown ? `Report: ${report.reportMarkdown}` : "",
-    screenshots ? `Screenshots:\n${screenshots}` : "",
+    report.jsonReportMarkdown ? `JSON: ${report.jsonReportMarkdown}` : "",
     result.nextTest?.title ? `Next recommended test: ${result.nextTest.title}` : "No more pending tests in this draft.",
   ].filter(Boolean).join("\n");
 }

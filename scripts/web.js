@@ -426,10 +426,13 @@ function addGeneratedQaStepUrls(result) {
 
 function addQaReportUrls(result) {
   const reportUrl = result.reportPath ? `/api/local-file?path=${encodeURIComponent(result.reportPath)}` : "";
+  const reportHtmlUrl = result.reportHtmlPath ? `/api/local-file?path=${encodeURIComponent(result.reportHtmlPath)}` : "";
   return {
     ...result,
     reportUrl,
-    reportMarkdown: reportUrl ? `[Open QA report](${reportUrl})` : "",
+    reportHtmlUrl,
+    reportMarkdown: reportHtmlUrl ? `[Open full QA report](${reportHtmlUrl})` : reportUrl ? `[Open QA report](${reportUrl})` : "",
+    jsonReportMarkdown: reportUrl ? `[Open JSON report](${reportUrl})` : "",
     screenshots: (result.screenshots || []).map((screenshot) => {
       const screenshotUrl = localImageUrl(screenshot.path || "");
       return {
@@ -507,9 +510,6 @@ function formatGeneratedQaRunResult(result) {
   }
 
   const report = result.report || {};
-  const screenshots = (report.screenshots || [])
-    .map((screenshot) => `- ${screenshot.screenshotMarkdown || screenshot.name || "Screenshot"}`)
-    .join("\n");
 
   return [
     `QA test completed for ${result.script?.plugin?.name || "plugin"}.`,
@@ -518,7 +518,7 @@ function formatGeneratedQaRunResult(result) {
     `Status: ${report.status || "unknown"}`,
     report.failure ? `Failure: ${report.failure}` : "",
     report.reportMarkdown ? `Report: ${report.reportMarkdown}` : "",
-    screenshots ? `Screenshots:\n${screenshots}` : "",
+    report.jsonReportMarkdown ? `JSON: ${report.jsonReportMarkdown}` : "",
     result.nextTest?.title ? `Next recommended test: ${result.nextTest.title}` : "No more pending tests in this draft.",
   ].filter(Boolean).join("\n");
 }

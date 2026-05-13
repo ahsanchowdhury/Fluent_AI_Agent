@@ -138,13 +138,13 @@ export async function runQaSteps(config, { recipe, steps: recipeSteps, reportSlu
     badResponses,
   };
 
-  const reportPath = path.join(reportDir, `${Date.now()}-${String(reportSlug).replace(/[^\w.-]+/g, "-")}.json`);
-  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  const { reportPath, reportHtmlPath } = writeQaReportFiles(reportDir, reportSlug, report);
   emitActivity(activity, "test", `QA recipe ${status}`);
 
   return {
     ...report,
     reportPath,
+    reportHtmlPath,
   };
 }
 
@@ -277,14 +277,178 @@ export async function runPluginQaSmoke(config, { plugin = "", maxLinks = 3, acti
     recommendations: buildPluginQaRecommendations({ status, failure, selectedAdminPage, pageSummary, exploredLinks, diagnostics }),
   };
 
-  const reportPath = path.join(reportDir, `${Date.now()}-plugin-smoke-${safeName(matchedPlugin.name)}.json`);
-  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  const { reportPath, reportHtmlPath } = writeQaReportFiles(reportDir, `plugin-smoke-${safeName(matchedPlugin.name)}`, report);
   emitActivity(activity, "test", `Generic plugin QA ${status}`);
 
   return {
     ...report,
     reportPath,
+    reportHtmlPath,
   };
+}
+
+function writeQaReportFiles(reportDir, slug, report) {
+  const safeSlug = String(slug || "qa-report").replace(/[^\w.-]+/g, "-");
+  const basePath = path.join(reportDir, `${Date.now()}-${safeSlug}`);
+  const reportPath = `${basePath}.json`;
+  const reportHtmlPath = `${basePath}.html`;
+  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  fs.writeFileSync(reportHtmlPath, renderQaReportHtml(report));
+  return { reportPath, reportHtmlPath };
+}
+
+function renderQaReportHtml(report) {
+  const title = report.recipe?.name || report.plugin?.name || report.type || "QA Report";
+  const screenshots = report.screenshots || [];
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)} QA Report</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; background: #f6f8fb; color: #18202a; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
+    main { max-width: 1120px; margin: 0 auto; padding: 28px; }
+    header, section { border: 1px solid #d8e0ea; border-radius: 14px; background: #fff; box-shadow: 0 12px 28px rgba(20,24,32,.06); }
+    header { padding: 24px; margin-bottom: 18px; }
+    section { padding: 20px; margin-top: 18px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 28px; line-height: 1.2; }
+    h2 { font-size: 18px; margin-bottom: 12px; }
+    h3 { font-size: 15px; margin-bottom: 6px; }
+    .muted { color: #667085; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+    .stat { border: 1px solid #d8e0ea; border-radius: 10px; background: #f8fafc; padding: 10px; }
+    .stat span { display: block; color: #667085; font-size: 12px; font-weight: 700; }
+    .stat strong { display: block; margin-top: 4px; overflow-wrap: anywhere; }
+    .status-passed { color: #177245; }
+    .status-failed { color: #b42318; }
+    ul, ol { margin: 0; padding-left: 22px; }
+    li { margin: 6px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #d8e0ea; padding: 8px; text-align: left; vertical-align: top; }
+    th { background: #f8fafc; font-size: 12px; text-transform: uppercase; color: #667085; }
+    code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; }
+    pre { overflow: auto; border: 1px solid #d8e0ea; border-radius: 10px; background: #f8fafc; padding: 12px; white-space: pre-wrap; }
+    figure { margin: 16px 0 0; border: 1px solid #d8e0ea; border-radius: 12px; overflow: hidden; background: #f8fafc; }
+    figcaption { padding: 10px 12px; color: #667085; font-size: 13px; font-weight: 700; }
+    img { display: block; width: 100%; height: auto; background: #fff; }
+    @media (max-width: 760px) { main { padding: 14px; } .grid { grid-template-columns: 1fr 1fr; } }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0c1118; color: #eef4fb; }
+      header, section { background: #111923; border-color: #263548; }
+      .muted { color: #94a3b8; }
+      .stat, th, pre, figure { background: #172231; border-color: #263548; }
+      th, td { border-color: #263548; }
+      .status-passed { color: #7dd3a8; }
+      .status-failed { color: #f97066; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="muted">QA Report</p>
+      <h1>${escapeHtml(title)}</h1>
+      <div class="grid">
+        <div class="stat"><span>Status</span><strong class="status-${escapeHtml(report.status || "unknown")}">${escapeHtml(report.status || "unknown")}</strong></div>
+        <div class="stat"><span>Started</span><strong>${escapeHtml(report.startedAt || "")}</strong></div>
+        <div class="stat"><span>Product</span><strong>${escapeHtml(report.recipe?.product || report.plugin?.name || "")}</strong></div>
+        <div class="stat"><span>Final URL</span><strong>${escapeHtml(report.finalUrl || "")}</strong></div>
+      </div>
+      ${report.failure ? `<p style="margin-top:16px;"><strong>Failure:</strong> ${escapeHtml(report.failure)}</p>` : ""}
+    </header>
+    ${renderReportSteps(report.steps || [])}
+    ${renderReportDiagnostics(report)}
+    ${renderReportScreenshots(screenshots)}
+    <section>
+      <h2>Raw Summary</h2>
+      <pre>${escapeHtml(JSON.stringify(compactReportForHtml(report), null, 2))}</pre>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
+function renderReportSteps(steps) {
+  return `<section>
+    <h2>Steps</h2>
+    ${steps.length ? `<table>
+      <thead><tr><th>#</th><th>Action</th><th>Status</th><th>Message</th></tr></thead>
+      <tbody>${steps.map((step, index) => `<tr>
+        <td>${escapeHtml(String(step.index ?? index + 1))}</td>
+        <td>${escapeHtml(step.action || "")}</td>
+        <td>${escapeHtml(step.status || "passed")}</td>
+        <td>${escapeHtml(step.message || "")}</td>
+      </tr>`).join("")}</tbody>
+    </table>` : "<p class=\"muted\">No steps recorded.</p>"}
+  </section>`;
+}
+
+function renderReportDiagnostics(report) {
+  const diagnostics = [
+    ["Console Errors", report.consoleErrors || []],
+    ["Page Errors", report.pageErrors || []],
+    ["Request Failures", report.requestFailures || []],
+    ["Bad Responses", report.badResponses || []],
+  ];
+  return `<section>
+    <h2>Diagnostics</h2>
+    ${diagnostics.map(([label, items]) => `<h3>${escapeHtml(label)}</h3>${items.length ? `<pre>${escapeHtml(JSON.stringify(items, null, 2))}</pre>` : "<p class=\"muted\">None detected.</p>"}`).join("")}
+  </section>`;
+}
+
+function renderReportScreenshots(screenshots) {
+  return `<section>
+    <h2>Screenshots</h2>
+    ${screenshots.length ? screenshots.map((screenshot) => renderEmbeddedScreenshot(screenshot)).join("") : "<p class=\"muted\">No screenshots captured.</p>"}
+  </section>`;
+}
+
+function renderEmbeddedScreenshot(screenshot) {
+  const dataUrl = imageFileToDataUrl(screenshot.path || "");
+  if (!dataUrl) {
+    return `<p class="muted">${escapeHtml(screenshot.name || "Screenshot")} could not be embedded.</p>`;
+  }
+
+  return `<figure>
+    <figcaption>${escapeHtml(screenshot.name || "Screenshot")}</figcaption>
+    <img src="${dataUrl}" alt="${escapeHtml(screenshot.name || "QA screenshot")}" />
+  </figure>`;
+}
+
+function imageFileToDataUrl(filePath) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return "";
+    const extension = path.extname(filePath).toLowerCase();
+    const mimeType = extension === ".jpg" || extension === ".jpeg" ? "image/jpeg" : extension === ".webp" ? "image/webp" : "image/png";
+    return `data:${mimeType};base64,${fs.readFileSync(filePath).toString("base64")}`;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function compactReportForHtml(report) {
+  return {
+    type: report.type || "qa-recipe",
+    status: report.status,
+    failure: report.failure,
+    startedAt: report.startedAt,
+    finalUrl: report.finalUrl,
+    recipe: report.recipe,
+    plugin: report.plugin,
+    selectedAdminPage: report.selectedAdminPage,
+    recommendations: report.recommendations,
+  };
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 async function runRecipeStep(page, config, step, context) {

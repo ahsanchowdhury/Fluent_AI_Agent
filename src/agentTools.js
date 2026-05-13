@@ -670,10 +670,13 @@ function addDebugImageUrlsToInteractiveResult(result) {
 
 function addQaReportUrls(result) {
   const reportUrl = result.reportPath ? `/api/local-file?path=${encodeURIComponent(result.reportPath)}` : "";
+  const reportHtmlUrl = result.reportHtmlPath ? `/api/local-file?path=${encodeURIComponent(result.reportHtmlPath)}` : "";
   return {
     ...result,
     reportUrl,
-    reportMarkdown: reportUrl ? `[Open QA report](${reportUrl})` : "",
+    reportHtmlUrl,
+    reportMarkdown: reportHtmlUrl ? `[Open full QA report](${reportHtmlUrl})` : reportUrl ? `[Open QA report](${reportUrl})` : "",
+    jsonReportMarkdown: reportUrl ? `[Open JSON report](${reportUrl})` : "",
     screenshots: (result.screenshots || []).map((screenshot) => {
       const screenshotUrl = absoluteLocalImageUrl(screenshot.path || "");
       return {
