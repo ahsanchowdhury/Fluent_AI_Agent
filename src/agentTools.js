@@ -14,6 +14,7 @@ import {
 } from "./tools/wordpress.js";
 import { debugPage, inspectInteractivePage, testFormPage } from "./tools/browser.js";
 import { listQaRecipes, runPluginQaSmoke, runQaRecipe } from "./tools/qaRunner.js";
+import { generateQaScript, listQaScripts, promoteQaScript, runNextQaScriptStep } from "./tools/qaScripts.js";
 
 const MAX_TOOL_OUTPUT_CHARS = 70000;
 
@@ -358,6 +359,77 @@ export const agentTools = [
       additionalProperties: false,
     },
   },
+  {
+    type: "function",
+    name: "list_qa_scripts",
+    description:
+      "List installed plugins with dynamic QA script readiness status. Use before generated docs-based QA flows.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "generate_qa_script",
+    description:
+      "Generate or refresh a docs/admin-discovery based QA script draft for one installed plugin. Use when the user asks to make QA scripts ready or test a plugin from docs and no script exists.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        plugin: {
+          type: "string",
+          description: "Installed plugin name or partial name, for example 'Fluent Forms'.",
+        },
+      },
+      required: ["plugin"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "run_next_qa_script_step",
+    description:
+      "Run exactly one pending generated QA script test case for a plugin. If plugin is empty, continue the most recently updated QA script.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        plugin: {
+          type: "string",
+          description: "Plugin name or empty string to continue the most recent QA script.",
+        },
+        testId: {
+          type: "string",
+          description: "Optional generated test id. Empty means run the next pending test.",
+        },
+      },
+      required: ["plugin", "testId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "promote_qa_script",
+    description:
+      "Promote a generated local QA script draft into tests/recipes so it appears in list_qa_recipes and can be committed.",
+    strict: true,
+    parameters: {
+      type: "object",
+      properties: {
+        plugin: {
+          type: "string",
+          description: "Plugin name or partial name whose QA script should be promoted.",
+        },
+      },
+      required: ["plugin"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 export async function runAgentTool(config, toolCall, options = {}) {
@@ -509,6 +581,36 @@ export async function runAgentTool(config, toolCall, options = {}) {
       return toolResult(true, addQaReportUrls(result));
     }
 
+    if (toolCall.name === "list_qa_scripts") {
+      emitActivity(activity, "test", "Listing generated QA scripts");
+      return toolResult(true, await listQaScripts(config));
+    }
+
+    if (toolCall.name === "generate_qa_script") {
+      emitActivity(activity, "test", `Generating QA script for ${args.plugin}`);
+      return toolResult(true, await generateQaScript(config, {
+        plugin: args.plugin || "",
+        activity,
+      }));
+    }
+
+    if (toolCall.name === "run_next_qa_script_step") {
+      emitActivity(activity, "test", `Running next QA script step${args.plugin ? ` for ${args.plugin}` : ""}`);
+      const result = await runNextQaScriptStep(config, {
+        plugin: args.plugin || "",
+        testId: args.testId || "",
+        activity,
+      });
+      return toolResult(true, addGeneratedQaStepUrls(result));
+    }
+
+    if (toolCall.name === "promote_qa_script") {
+      emitActivity(activity, "test", `Promoting QA script for ${args.plugin}`);
+      return toolResult(true, promoteQaScript(config, {
+        plugin: args.plugin || "",
+      }));
+    }
+
     return toolResult(false, `Unknown tool: ${toolCall.name}`);
   } catch (error) {
     return toolResult(false, error.message);
@@ -580,6 +682,17 @@ function addQaReportUrls(result) {
         screenshotMarkdown: screenshotUrl ? `[Open ${screenshot.name || "QA screenshot"}](${screenshotUrl})` : "",
       };
     }),
+  };
+}
+
+function addGeneratedQaStepUrls(result) {
+  if (result.blocked || !result.report) {
+    return result;
+  }
+
+  return {
+    ...result,
+    report: addQaReportUrls(result.report),
   };
 }
 

@@ -29,6 +29,22 @@ export function listQaRecipes() {
 export async function runQaRecipe(config, { recipeId, activity = null } = {}) {
   const recipePath = resolveRecipePath(recipeId);
   const recipe = readRecipeFile(recipePath);
+  return runQaSteps(config, {
+    recipe: {
+      id: recipeIdFromPath(recipePath),
+      name: recipe.name || "",
+      product: recipe.product || "",
+      area: recipe.area || "",
+      risk: recipe.risk || "low",
+      path: path.relative(process.cwd(), recipePath),
+    },
+    steps: recipe.steps || [],
+    reportSlug: recipeIdFromPath(recipePath),
+    activity,
+  });
+}
+
+export async function runQaSteps(config, { recipe, steps: recipeSteps, reportSlug = "qa-steps", activity = null } = {}) {
   const reportDir = path.resolve(process.cwd(), "memory", "qa-reports");
   const screenshotDir = path.resolve(process.cwd(), "memory", "screenshots");
   fs.mkdirSync(reportDir, { recursive: true });
@@ -42,7 +58,7 @@ export async function runQaRecipe(config, { recipeId, activity = null } = {}) {
     throw new Error("WP_ADMIN_USER and WP_ADMIN_PASSWORD are required in .env to run QA recipes.");
   }
 
-  emitActivity(activity, "test", `Starting QA recipe: ${recipe.name || recipeId}`);
+  emitActivity(activity, "test", `Starting QA recipe: ${recipe.name || reportSlug}`);
 
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
@@ -81,7 +97,7 @@ export async function runQaRecipe(config, { recipeId, activity = null } = {}) {
   let failure = "";
 
   try {
-    for (const [index, step] of recipe.steps.entries()) {
+    for (const [index, step] of (recipeSteps || []).entries()) {
       const result = await runRecipeStep(page, config, step, {
         index,
         recipe,
@@ -109,14 +125,7 @@ export async function runQaRecipe(config, { recipeId, activity = null } = {}) {
   await browser.close().catch(() => null);
 
   const report = {
-    recipe: {
-      id: recipeIdFromPath(recipePath),
-      name: recipe.name || "",
-      product: recipe.product || "",
-      area: recipe.area || "",
-      risk: recipe.risk || "low",
-      path: path.relative(process.cwd(), recipePath),
-    },
+    recipe,
     status,
     failure,
     startedAt: new Date().toISOString(),
@@ -129,7 +138,7 @@ export async function runQaRecipe(config, { recipeId, activity = null } = {}) {
     badResponses,
   };
 
-  const reportPath = path.join(reportDir, `${Date.now()}-${recipeIdFromPath(recipePath).replace(/[^\w.-]+/g, "-")}.json`);
+  const reportPath = path.join(reportDir, `${Date.now()}-${String(reportSlug).replace(/[^\w.-]+/g, "-")}.json`);
   fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
   emitActivity(activity, "test", `QA recipe ${status}`);
 

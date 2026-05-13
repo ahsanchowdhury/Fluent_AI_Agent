@@ -10,6 +10,7 @@ import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { localImageUrl, saveImageAttachments } from "../src/imageInputs.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listPluginDirectories } from "../src/tools/filesystem.js";
+import { generateQaScript, listQaScripts, promoteQaScript, runNextQaScriptStep } from "../src/tools/qaScripts.js";
 import { activateTheme, changePluginStatus, getWordPressSiteSummary, listThemes } from "../src/tools/wordpress.js";
 import {
   detectWordPressAction,
@@ -148,6 +149,42 @@ app.get("/api/themes", async (_request, response) => {
     return;
   }
   response.json(result);
+});
+
+app.get("/api/qa/scripts", async (_request, response) => {
+  try {
+    response.json(await listQaScripts(config));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/qa/scripts/generate", async (request, response) => {
+  try {
+    const plugin = String(request.body?.plugin || "").trim();
+    response.json(await generateQaScript(config, { plugin }));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/qa/scripts/run-step", async (request, response) => {
+  try {
+    const plugin = String(request.body?.plugin || "").trim();
+    const testId = String(request.body?.testId || "").trim();
+    response.json(addGeneratedQaStepUrls(await runNextQaScriptStep(config, { plugin, testId })));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/api/qa/scripts/promote", async (request, response) => {
+  try {
+    const plugin = String(request.body?.plugin || "").trim();
+    response.json(promoteQaScript(config, { plugin }));
+  } catch (error) {
+    response.status(500).json({ error: error.message });
+  }
 });
 
 app.post("/api/plugin-action", async (request, response) => {
@@ -366,6 +403,34 @@ function buildMessageActionPrompt(action, { text, history }) {
       createdAt: message.createdAt,
     })), null, 2),
   ].join("\n");
+}
+
+function addGeneratedQaStepUrls(result) {
+  if (result.blocked || !result.report) {
+    return result;
+  }
+
+  return {
+    ...result,
+    report: addQaReportUrls(result.report),
+  };
+}
+
+function addQaReportUrls(result) {
+  const reportUrl = result.reportPath ? `/api/local-file?path=${encodeURIComponent(result.reportPath)}` : "";
+  return {
+    ...result,
+    reportUrl,
+    reportMarkdown: reportUrl ? `[Open QA report](${reportUrl})` : "",
+    screenshots: (result.screenshots || []).map((screenshot) => {
+      const screenshotUrl = localImageUrl(screenshot.path || "");
+      return {
+        ...screenshot,
+        screenshotUrl,
+        screenshotMarkdown: screenshotUrl ? `[Open ${screenshot.name || "QA screenshot"}](${screenshotUrl})` : "",
+      };
+    }),
+  };
 }
 
 function getManifestPath() {

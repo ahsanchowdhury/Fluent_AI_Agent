@@ -7,7 +7,7 @@
     <link rel="icon" href="/agent-icon.svg" type="image/svg+xml" />
     <link rel="mask-icon" href="/agent-icon.svg" color="#0f6cbd" />
     <meta name="theme-color" content="#0f6cbd" />
-    <link rel="stylesheet" href="/styles.css?v=20260513-composer-actions" />
+    <link rel="stylesheet" href="/styles.css?v=20260513-qa-scripts" />
   </head>
   <body>
     <main class="app">
@@ -45,6 +45,11 @@
         <section class="panel">
           <h2>Memory</h2>
           <button id="openMemoryViewer" class="secondary" type="button">View Local Memory</button>
+        </section>
+
+        <section class="panel qa-scripts">
+          <h2>QA Scripts</h2>
+          <ul id="qaScriptsList"></ul>
         </section>
 
         <section class="panel plugins">
@@ -115,6 +120,6 @@
         </div>
       </section>
     </div>
-    <script src="/app.js?v=20260513-composer-actions" type="module"></script>
+    <script src="/app.js?v=20260513-qa-scripts" type="module"></script>
   </body>
 </html>

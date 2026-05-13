@@ -7,6 +7,7 @@ const form = document.querySelector("#chatForm");
 const input = document.querySelector("#messageInput");
 const statusList = document.querySelector("#statusList");
 const pluginsList = document.querySelector("#pluginsList");
+const qaScriptsList = document.querySelector("#qaScriptsList");
 const themesList = document.querySelector("#themesList");
 const conversationList = document.querySelector("#conversationList");
 const siteLabel = document.querySelector("#siteLabel");
@@ -134,6 +135,7 @@ async function loadStatus() {
     pluginsList.append(createPluginItem(plugin));
   }
 
+  await loadQaScripts();
   await loadThemes();
 }
 
@@ -157,6 +159,187 @@ async function loadThemes() {
     item.textContent = `Theme list error: ${error.message}`;
     themesList.append(item);
   }
+}
+
+async function loadQaScripts() {
+  try {
+    const result = await fetchJson("/api/qa/scripts");
+    renderQaScripts(result.plugins || []);
+  } catch (error) {
+    qaScriptsList.innerHTML = "";
+    const item = document.createElement("li");
+    item.className = "qa-empty";
+    item.textContent = `QA script list error: ${error.message}`;
+    qaScriptsList.append(item);
+  }
+}
+
+function renderQaScripts(items) {
+  qaScriptsList.innerHTML = "";
+  if (!items.length) {
+    const item = document.createElement("li");
+    item.className = "qa-empty";
+    item.textContent = "No installed plugins found.";
+    qaScriptsList.append(item);
+    return;
+  }
+
+  for (const item of items) {
+    qaScriptsList.append(createQaScriptItem(item));
+  }
+}
+
+function createQaScriptItem(item) {
+  const plugin = item.plugin || {};
+  const li = document.createElement("li");
+  li.className = "manage-item qa-script-item";
+
+  const row = document.createElement("div");
+  row.className = "manage-row";
+
+  const title = document.createElement("div");
+  title.className = "manage-name";
+  title.textContent = plugin.name || "Unknown plugin";
+
+  const status = document.createElement("span");
+  status.className = `qa-pill ${qaStatusClass(item.status)}`;
+  status.textContent = item.status || "Not ready";
+  row.append(title, status);
+
+  const meta = document.createElement("div");
+  meta.className = "item-meta qa-meta";
+  const next = item.nextTest ? `Next: ${item.nextTest}` : "No pending test";
+  const last = item.lastRun ? `Last run: ${item.lastRun.status}` : "Never run";
+  meta.textContent = `${item.testCount || 0} tests · ${next} · ${last}`;
+
+  const actions = document.createElement("div");
+  actions.className = "qa-actions";
+
+  const generate = document.createElement("button");
+  generate.className = "mini-button neutral";
+  generate.type = "button";
+  generate.textContent = item.status === "Not ready" ? "Make Ready" : "Refresh";
+  generate.addEventListener("click", () => generateQaScriptForPlugin(item));
+  actions.append(generate);
+
+  if (item.status !== "Not ready") {
+    const run = document.createElement("button");
+    run.className = "mini-button";
+    run.type = "button";
+    run.textContent = "Run Next";
+    run.disabled = !item.nextTest;
+    run.addEventListener("click", () => runQaScriptStep(item));
+    actions.append(run);
+
+    if (item.status !== "Promoted recipe") {
+      const promote = document.createElement("button");
+      promote.className = "mini-button neutral";
+      promote.type = "button";
+      promote.textContent = "Promote";
+      promote.addEventListener("click", () => promoteQaScriptForPlugin(item));
+      actions.append(promote);
+    }
+  }
+
+  li.append(row, meta, actions);
+  return li;
+}
+
+function qaStatusClass(status) {
+  if (status === "Promoted recipe") return "promoted";
+  if (status === "Draft ready") return "draft";
+  return "not-ready";
+}
+
+async function generateQaScriptForPlugin(item) {
+  const pluginName = item.plugin?.name || item.plugin?.file || "";
+  if (!pluginName) return;
+
+  addMessage("system", `Making QA script ready for ${pluginName}...`);
+  setBusy(true);
+  try {
+    const result = await postJson("/api/qa/scripts/generate", { plugin: pluginName });
+    const script = result.script || {};
+    const next = script.testCases?.[script.runState?.nextIndex || 0]?.title || "No pending test";
+    addMessage("assistant", [
+      `QA draft is ready for ${script.plugin?.name || pluginName}.`,
+      "",
+      `Tests generated: ${script.testCases?.length || 0}`,
+      `Next recommended test: ${next}`,
+      `Draft file: \`${script.path || "memory/qa-scripts"}\``,
+    ].join("\n"));
+    await loadQaScripts();
+  } catch (error) {
+    addMessage("system", `QA script generation failed: ${error.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function runQaScriptStep(item) {
+  const pluginName = item.plugin?.name || item.plugin?.file || "";
+  if (!pluginName) return;
+
+  addMessage("system", `Running the next QA test for ${pluginName}...`);
+  setBusy(true);
+  try {
+    const result = await postJson("/api/qa/scripts/run-step", { plugin: pluginName });
+    addMessage("assistant", formatQaRunResult(result));
+    await loadQaScripts();
+  } catch (error) {
+    addMessage("system", `QA test failed: ${error.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function promoteQaScriptForPlugin(item) {
+  const pluginName = item.plugin?.name || item.plugin?.file || "";
+  if (!pluginName) return;
+
+  addMessage("system", `Promoting QA draft for ${pluginName}...`);
+  setBusy(true);
+  try {
+    const result = await postJson("/api/qa/scripts/promote", { plugin: pluginName });
+    addMessage("assistant", [
+      `QA draft promoted for ${result.script?.plugin?.name || pluginName}.`,
+      "",
+      `Recipe: \`${result.recipeId || result.recipePath}\``,
+      `File: \`${result.recipePath}\``,
+    ].join("\n"));
+    await loadQaScripts();
+  } catch (error) {
+    addMessage("system", `QA promotion failed: ${error.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function formatQaRunResult(result) {
+  if (result.blocked) {
+    return [
+      `QA test is blocked for ${result.script?.plugin?.name || "this plugin"}.`,
+      "",
+      `Test: ${result.testCase?.title || "Unknown test"}`,
+      `Reason: ${result.reason || "This test requires confirmation."}`,
+    ].join("\n");
+  }
+
+  const report = result.report || {};
+  const screenshots = (report.screenshots || [])
+    .map((screenshot) => `- ${screenshot.screenshotMarkdown || screenshot.name || "Screenshot"}`)
+    .join("\n");
+
+  return [
+    `QA test completed for ${result.script?.plugin?.name || "plugin"}.`,
+    "",
+    `Test: ${result.testCase?.title || "Unknown test"}`,
+    `Status: ${report.status || "unknown"}`,
+    report.failure ? `Failure: ${report.failure}` : "",
+    report.reportMarkdown ? `Report: ${report.reportMarkdown}` : "",
+    screenshots ? `Screenshots:\n${screenshots}` : "",
+    result.nextTest?.title ? `Next recommended test: ${result.nextTest.title}` : "No more pending tests in this draft.",
+  ].filter(Boolean).join("\n");
 }
 
 function createPluginItem(plugin) {
