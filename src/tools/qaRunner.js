@@ -355,13 +355,14 @@ function renderQaReportHtml(report) {
         <div class="stat"><span>Status</span><strong class="status-${escapeHtml(report.status || "unknown")}">${escapeHtml(report.status || "unknown")}</strong></div>
         <div class="stat"><span>Started</span><strong>${escapeHtml(report.startedAt || "")}</strong></div>
         <div class="stat"><span>Product</span><strong>${escapeHtml(report.recipe?.product || report.plugin?.name || "")}</strong></div>
-        <div class="stat"><span>Final URL</span><strong>${escapeHtml(report.finalUrl || "")}</strong></div>
+        <div class="stat"><span>Screenshots</span><strong>${escapeHtml(String(screenshots.length))}</strong></div>
       </div>
+      ${report.finalUrl ? `<p style="margin-top:16px;"><strong>Final URL:</strong> ${escapeHtml(report.finalUrl)}</p>` : ""}
       ${report.failure ? `<p style="margin-top:16px;"><strong>Failure:</strong> ${escapeHtml(report.failure)}</p>` : ""}
     </header>
     ${renderReportSteps(report.steps || [])}
-    ${renderReportDiagnostics(report)}
     ${renderReportScreenshots(screenshots)}
+    ${renderReportDiagnostics(report)}
     <section>
       <h2>Raw Summary</h2>
       <pre>${escapeHtml(JSON.stringify(compactReportForHtml(report), null, 2))}</pre>
