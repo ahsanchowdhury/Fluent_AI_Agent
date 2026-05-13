@@ -44,7 +44,7 @@ export async function generateQaScript(config, { plugin = "", activity = null } 
   emitActivity(activity, "test", `Discovering admin UI for ${matchedPlugin.name}`);
   const smoke = await runPluginQaSmoke(config, {
     plugin: matchedPlugin.name,
-    maxLinks: 2,
+    maxLinks: 5,
     activity,
   });
 
@@ -190,28 +190,48 @@ export function promoteQaScript(config, { plugin = "" } = {}) {
 function buildTestCases(plugin, smoke, docSources) {
   const selectedUrl = smoke.selectedAdminPage?.href || "";
   const selectedText = smoke.selectedAdminPage?.text || plugin.name;
-  const firstRelated = smoke.exploredLinks?.[0]?.finalUrl || smoke.exploredLinks?.[0]?.href || "";
   const docTitle = docSources[0]?.title || `${plugin.name} documentation`;
   const isPluginsFallback = selectedText === "Plugins screen fallback";
+  const relatedPages = collectRelatedAdminPages(smoke);
+  const testCases = [];
 
-  const testCases = [
-    {
-      id: "admin-dashboard-loads",
-      title: isPluginsFallback ? `Open ${plugin.name} plugin entry` : `Open ${plugin.name} admin dashboard`,
-      area: "admin",
+  if (isPluginsFallback) {
+    testCases.push({
+      id: "plugin-entry-loads",
+      title: `Open ${plugin.name} plugin entry`,
+      area: "wordpress-admin",
       risk: "low",
-      source: smoke.selectedAdminPage ? "admin discovery" : "plugin metadata",
-      expectedResult: isPluginsFallback
-        ? "The WordPress Plugins screen opens for this plugin because no matching plugin admin menu was detected."
-        : "The plugin admin page loads without fatal, console, page, or network errors.",
+      source: "plugin metadata",
+      expectedResult: "The WordPress Plugins screen opens for this plugin because no matching plugin admin menu was detected.",
+      screenshotRequired: true,
+      steps: [
+        { action: "login_admin" },
+        { action: "go_to", path: selectedUrl },
+        { action: "screenshot", name: `${plugin.name} plugin entry` },
+      ],
+    });
+  } else {
+    testCases.push({
+      id: "admin-area-sweep",
+      title: `Sweep ${plugin.name} admin area`,
+      area: "admin-navigation",
+      risk: "low",
+      source: "admin discovery",
+      expectedResult: "The main plugin admin page and safe related plugin pages load without fatal, console, page, or network errors.",
       screenshotRequired: true,
       steps: [
         { action: "login_admin" },
         { action: "go_to", path: selectedUrl },
         { action: "screenshot", name: `${plugin.name} admin dashboard` },
+        ...relatedPages.flatMap((page) => [
+          { action: "go_to", path: page.href },
+          { action: "screenshot", name: `${plugin.name} ${page.text}` },
+        ]),
       ],
-    },
-    {
+    });
+  }
+
+  testCases.push({
       id: "plugin-status-visible",
       title: `Verify ${plugin.name} is visible on Plugins screen`,
       area: "wordpress-admin",
@@ -225,25 +245,7 @@ function buildTestCases(plugin, smoke, docSources) {
         { action: "wait_for_text", text: plugin.name, timeout: 12000 },
         { action: "screenshot", name: `${plugin.name} plugin status` },
       ],
-    },
-  ];
-
-  if (!isPluginsFallback && firstRelated) {
-    testCases.push({
-      id: "related-admin-page-loads",
-      title: `Open a related ${plugin.name} admin page`,
-      area: "admin-navigation",
-      risk: "low",
-      source: "admin discovery",
-      expectedResult: "A related plugin admin page loads and remains usable.",
-      screenshotRequired: true,
-      steps: [
-        { action: "login_admin" },
-        { action: "go_to", path: firstRelated || selectedUrl },
-        { action: "screenshot", name: `${plugin.name} related admin page` },
-      ],
-    });
-  }
+  });
 
   if (!isPluginsFallback && selectedUrl) {
     testCases.push({
@@ -263,6 +265,24 @@ function buildTestCases(plugin, smoke, docSources) {
   }
 
   return testCases.filter((testCase) => testCase.steps.every((step) => step.action !== "go_to" || step.path));
+}
+
+function collectRelatedAdminPages(smoke) {
+  const selectedUrl = smoke.selectedAdminPage?.href || "";
+  const seen = new Set([selectedUrl]);
+  const pages = [];
+
+  for (const link of smoke.exploredLinks || []) {
+    const href = link.finalUrl || link.href || "";
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    pages.push({
+      text: link.text || link.title || "related page",
+      href,
+    });
+  }
+
+  return pages.slice(0, 5);
 }
 
 function findDocSources(config, plugin) {

@@ -605,7 +605,7 @@ function selectPluginAdminPage(menuLinks, plugin) {
       const textWords = normalizeWords(link.text);
       const hrefWords = normalizeWords(link.href);
       const matchedWords = pluginWords.filter((word) => [...textWords, ...hrefWords].some((item) => wordsMatch(item, word)));
-      const strongHrefMatch = folderSlug && link.href.toLowerCase().includes(folderSlug);
+      const strongHrefMatch = pluginIdentityMatchesHref(plugin, link.href);
       const textScore = pluginWords.reduce((sum, word) => sum + (textWords.some((item) => wordsMatch(item, word)) ? 4 : 0), 0);
       const hrefScore = pluginWords.reduce((sum, word) => sum + (hrefWords.some((item) => wordsMatch(item, word)) ? 1 : 0), 0);
       const pageBoost = /admin\.php\?page=/.test(link.href) ? 2 : 0;
@@ -668,7 +668,6 @@ async function inspectAdminPage(page) {
 
 function findSafeAdminLinks(links, currentHref, plugin) {
   const pluginWords = distinctivePluginWords(plugin);
-  const folderSlug = String(plugin.file || "").split("/")[0]?.toLowerCase() || "";
   const safeText = /\b(settings?|setup|all|forms?|entries|submissions?|contacts?|tables?|products?|reports?|tools?|integrations?|add new|create)\b/i;
   const unsafeText = /\b(skip|delete|remove|trash|deactivate|activate|disconnect|logout|reset|clear|sync|send|publish|import|export|install|uninstall|migrate|upgrade|license)\b/i;
   const seen = new Set([currentHref]);
@@ -681,8 +680,8 @@ function findSafeAdminLinks(links, currentHref, plugin) {
       if (unsafeText.test(link.text) || unsafeText.test(link.href)) return false;
       const linkWords = normalizeWords(`${link.text} ${link.href}`);
       const hasPluginWord = pluginWords.some((word) => linkWords.some((item) => wordsMatch(item, word)));
-      const strongHrefMatch = folderSlug && link.href.toLowerCase().includes(folderSlug);
-      return hasPluginWord || (strongHrefMatch && safeText.test(link.text));
+      const strongHrefMatch = pluginIdentityMatchesHref(plugin, link.href);
+      return strongHrefMatch && (hasPluginWord || safeText.test(link.text));
     })
     .map((link) => {
       seen.add(link.href);
@@ -872,6 +871,23 @@ function distinctivePluginWords(plugin) {
   const words = normalizeWords(`${plugin.name || ""} ${String(plugin.file || "").split("/")[0] || ""}`)
     .filter((word) => !generic.has(word));
   return [...new Set(words)];
+}
+
+function pluginIdentityMatchesHref(plugin, href) {
+  const compactHref = compactIdentity(href);
+  const folderSlug = String(plugin.file || "").split("/")[0] || "";
+  const variants = [
+    plugin.name || "",
+    folderSlug,
+    safeName(plugin.name || ""),
+    safeName(folderSlug),
+  ].map(compactIdentity).filter((value) => value.length >= 5);
+
+  return [...new Set(variants)].some((variant) => compactHref.includes(variant) || variant.includes(compactHref));
+}
+
+function compactIdentity(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function wordsMatch(candidate, expected) {
