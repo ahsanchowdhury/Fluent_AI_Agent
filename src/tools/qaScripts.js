@@ -192,15 +192,18 @@ function buildTestCases(plugin, smoke, docSources) {
   const selectedText = smoke.selectedAdminPage?.text || plugin.name;
   const firstRelated = smoke.exploredLinks?.[0]?.finalUrl || smoke.exploredLinks?.[0]?.href || "";
   const docTitle = docSources[0]?.title || `${plugin.name} documentation`;
+  const isPluginsFallback = selectedText === "Plugins screen fallback";
 
-  return [
+  const testCases = [
     {
       id: "admin-dashboard-loads",
-      title: `Open ${plugin.name} admin dashboard`,
+      title: isPluginsFallback ? `Open ${plugin.name} plugin entry` : `Open ${plugin.name} admin dashboard`,
       area: "admin",
       risk: "low",
       source: smoke.selectedAdminPage ? "admin discovery" : "plugin metadata",
-      expectedResult: "The plugin admin page loads without fatal, console, page, or network errors.",
+      expectedResult: isPluginsFallback
+        ? "The WordPress Plugins screen opens for this plugin because no matching plugin admin menu was detected."
+        : "The plugin admin page loads without fatal, console, page, or network errors.",
       screenshotRequired: true,
       steps: [
         { action: "login_admin" },
@@ -223,7 +226,10 @@ function buildTestCases(plugin, smoke, docSources) {
         { action: "screenshot", name: `${plugin.name} plugin status` },
       ],
     },
-    {
+  ];
+
+  if (!isPluginsFallback && firstRelated) {
+    testCases.push({
       id: "related-admin-page-loads",
       title: `Open a related ${plugin.name} admin page`,
       area: "admin-navigation",
@@ -236,8 +242,11 @@ function buildTestCases(plugin, smoke, docSources) {
         { action: "go_to", path: firstRelated || selectedUrl },
         { action: "screenshot", name: `${plugin.name} related admin page` },
       ],
-    },
-    {
+    });
+  }
+
+  if (!isPluginsFallback && selectedUrl) {
+    testCases.push({
       id: "docs-guided-admin-check",
       title: `Docs-guided ${selectedText} check`,
       area: "docs-guided",
@@ -250,8 +259,10 @@ function buildTestCases(plugin, smoke, docSources) {
         { action: "go_to", path: selectedUrl },
         { action: "screenshot", name: `${plugin.name} docs guided check` },
       ],
-    },
-  ].filter((testCase) => testCase.steps.every((step) => step.action !== "go_to" || step.path));
+    });
+  }
+
+  return testCases.filter((testCase) => testCase.steps.every((step) => step.action !== "go_to" || step.path));
 }
 
 function findDocSources(config, plugin) {

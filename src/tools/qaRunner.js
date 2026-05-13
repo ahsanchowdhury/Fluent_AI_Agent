@@ -596,25 +596,27 @@ async function collectAdminMenuLinks(page) {
 }
 
 function selectPluginAdminPage(menuLinks, plugin) {
-  const pluginWords = normalizeWords(`${plugin.name} ${plugin.file}`);
-  const folderWords = normalizeWords(String(plugin.file || "").split("/")[0] || "");
-  const words = [...new Set([...pluginWords, ...folderWords])].filter((word) => !["plugin", "plugins", "pro", "free", "addon", "add"].includes(word));
+  const pluginWords = distinctivePluginWords(plugin);
+  const folderSlug = String(plugin.file || "").split("/")[0]?.toLowerCase() || "";
   const blocked = /\b(logout|profile|updates?|comments?|media|pages?|posts?|users?|tools|settings|dashboard)\b/i;
 
   return menuLinks
     .map((link) => {
       const textWords = normalizeWords(link.text);
       const hrefWords = normalizeWords(link.href);
-      const textScore = words.reduce((sum, word) => sum + (textWords.some((item) => item.includes(word) || word.includes(item)) ? 4 : 0), 0);
-      const hrefScore = words.reduce((sum, word) => sum + (hrefWords.some((item) => item.includes(word) || word.includes(item)) ? 1 : 0), 0);
+      const matchedWords = pluginWords.filter((word) => [...textWords, ...hrefWords].some((item) => wordsMatch(item, word)));
+      const strongHrefMatch = folderSlug && link.href.toLowerCase().includes(folderSlug);
+      const textScore = pluginWords.reduce((sum, word) => sum + (textWords.some((item) => wordsMatch(item, word)) ? 4 : 0), 0);
+      const hrefScore = pluginWords.reduce((sum, word) => sum + (hrefWords.some((item) => wordsMatch(item, word)) ? 1 : 0), 0);
       const pageBoost = /admin\.php\?page=/.test(link.href) ? 2 : 0;
       const topLevelBoost = textScore > 0 && !/\b(entries|settings|tools|reports|addons?|integrations?)\b/i.test(link.text) ? 3 : 0;
       const score = textScore + hrefScore;
       const blockedPenalty = blocked.test(link.text) && score < 4 ? -3 : 0;
+      const minimumMatch = strongHrefMatch || matchedWords.length >= 1;
       return {
         ...link,
-        score: score + pageBoost + topLevelBoost + blockedPenalty,
-        reason: `Matched ${textScore} text points and ${hrefScore} URL points`,
+        score: minimumMatch ? score + pageBoost + topLevelBoost + blockedPenalty + (strongHrefMatch ? 5 : 0) : 0,
+        reason: `Matched ${textScore} text points, ${hrefScore} URL points, distinctive words: ${matchedWords.join(", ") || "none"}`,
       };
     })
     .filter((link) => link.score > 1)
@@ -665,7 +667,8 @@ async function inspectAdminPage(page) {
 }
 
 function findSafeAdminLinks(links, currentHref, plugin) {
-  const pluginWords = normalizeWords(`${plugin.name} ${plugin.file}`);
+  const pluginWords = distinctivePluginWords(plugin);
+  const folderSlug = String(plugin.file || "").split("/")[0]?.toLowerCase() || "";
   const safeText = /\b(settings?|setup|all|forms?|entries|submissions?|contacts?|tables?|products?|reports?|tools?|integrations?|add new|create)\b/i;
   const unsafeText = /\b(skip|delete|remove|trash|deactivate|activate|disconnect|logout|reset|clear|sync|send|publish|import|export|install|uninstall|migrate|upgrade|license)\b/i;
   const seen = new Set([currentHref]);
@@ -677,9 +680,9 @@ function findSafeAdminLinks(links, currentHref, plugin) {
       if (seen.has(link.href)) return false;
       if (unsafeText.test(link.text) || unsafeText.test(link.href)) return false;
       const linkWords = normalizeWords(`${link.text} ${link.href}`);
-      const hasPluginWord = pluginWords.some((word) => linkWords.some((item) => item.includes(word) || word.includes(item)));
-      const isPluginAdminPage = /admin\.php\?page=/i.test(link.href);
-      return hasPluginWord || (isPluginAdminPage && safeText.test(link.text));
+      const hasPluginWord = pluginWords.some((word) => linkWords.some((item) => wordsMatch(item, word)));
+      const strongHrefMatch = folderSlug && link.href.toLowerCase().includes(folderSlug);
+      return hasPluginWord || (strongHrefMatch && safeText.test(link.text));
     })
     .map((link) => {
       seen.add(link.href);
@@ -844,6 +847,40 @@ function normalizeWords(text) {
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
     .filter((word) => word.length > 2);
+}
+
+function distinctivePluginWords(plugin) {
+  const generic = new Set([
+    "plugin",
+    "plugins",
+    "addon",
+    "free",
+    "pro",
+    "add",
+    "new",
+    "the",
+    "and",
+    "for",
+    "easy",
+    "data",
+    "tool",
+    "tools",
+    "builder",
+    "management",
+    "fluent",
+  ]);
+  const words = normalizeWords(`${plugin.name || ""} ${String(plugin.file || "").split("/")[0] || ""}`)
+    .filter((word) => !generic.has(word));
+  return [...new Set(words)];
+}
+
+function wordsMatch(candidate, expected) {
+  if (!candidate || !expected) return false;
+  if (candidate === expected) return true;
+  if (candidate.length >= 5 && expected.length >= 5) {
+    return candidate.startsWith(expected) || expected.startsWith(candidate);
+  }
+  return false;
 }
 
 function trim(items, limit = 80) {
