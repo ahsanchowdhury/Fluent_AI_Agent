@@ -163,7 +163,13 @@ app.get("/api/qa/scripts", async (_request, response) => {
 app.post("/api/qa/scripts/generate", async (request, response) => {
   try {
     const plugin = String(request.body?.plugin || "").trim();
-    response.json(await generateQaScript(config, { plugin }));
+    const conversationId = String(request.body?.conversationId || "default");
+    const result = await generateQaScript(config, { plugin });
+    rememberQaSessionFromScript(conversationId, result.script);
+    response.json({
+      ...result,
+      qaSession: getQaSession(conversationId),
+    });
   } catch (error) {
     response.status(500).json({ error: error.message });
   }
@@ -459,17 +465,7 @@ function addQaReportUrls(result) {
 }
 
 async function maybeRunQaScriptFromChat(message, conversationId, activity) {
-  const normalizedMessage = normalizeForMatch(message);
   const activeSession = getQaSession(conversationId);
-
-  if (activeSession && isStopQaModeMessage(normalizedMessage)) {
-    qaSessionContext.delete(conversationId);
-    return {
-      doneMessage: "QA mode stopped",
-      text: `QA mode stopped for ${activeSession.pluginName}. Normal chat routing is active again.`,
-    };
-  }
-
   const match = await matchQaContinuation(message, activeSession);
   if (!match) {
     return null;
@@ -546,16 +542,30 @@ function rememberQaSession(conversationId, result) {
   });
 }
 
+function rememberQaSessionFromScript(conversationId, script) {
+  const pluginName = script?.plugin?.name || script?.plugin?.file || "";
+  if (!conversationId || !pluginName) {
+    return;
+  }
+
+  const nextTest = script.testCases?.[script.runState?.nextIndex || 0]?.title || "";
+  qaSessionContext.set(conversationId, {
+    mode: "qa_testing",
+    pluginName,
+    pluginFile: script.plugin?.file || "",
+    nextTest,
+    lastTest: script.runState?.lastRun?.title || "",
+    lastStatus: script.runState?.lastRun?.status || "",
+    updatedAt: Date.now(),
+  });
+}
+
 function getQaSession(conversationId) {
   const session = qaSessionContext.get(conversationId);
   if (!session?.pluginName) {
     return null;
   }
   return session;
-}
-
-function isStopQaModeMessage(normalizedMessage) {
-  return /^(stop testing|stop qa|exit qa|exit testing|end testing|end qa|normal chat|back to normal)$/.test(normalizedMessage);
 }
 
 function buildQaModeInput(session, message) {
@@ -565,7 +575,7 @@ function buildQaModeInput(session, message) {
     session.pluginFile ? `Plugin file: ${session.pluginFile}.` : "",
     session.lastTest ? `Last QA test: ${session.lastTest}.` : "",
     session.lastStatus ? `Last QA status: ${session.lastStatus}.` : "",
-    session.nextTest ? `Next saved QA test: ${session.nextTest}.` : "There is no pending saved QA test, but QA mode remains active until the user says stop testing.",
+    session.nextTest ? `Next saved QA test: ${session.nextTest}.` : "There is no pending saved QA test, but QA mode remains active for this chat.",
     "",
     `Every user message must be interpreted as QA/testing context for ${session.pluginName}, no matter what the message says.`,
     `Do not switch the focus away from ${session.pluginName}.`,
@@ -575,7 +585,7 @@ function buildQaModeInput(session, message) {
     "If the user asks to continue, run the next generated QA script step for the active plugin.",
     `If the user asks for a specific check or test focus, answer as a QA tester for ${session.pluginName} and use available docs/code/browser tools only for that active plugin unless comparison is necessary.`,
     "Do not give a regular support answer while QA mode is active.",
-    "Remind the user they can say 'stop testing' to leave QA mode only when it is helpful.",
+    "If the user wants normal support chat, tell them to open a new chat. Do not suggest leaving QA mode inside this chat.",
     "",
     `User message: ${message}`,
   ].filter(Boolean).join("\n");

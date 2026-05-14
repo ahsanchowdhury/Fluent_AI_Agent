@@ -259,7 +259,10 @@ async function generateQaScriptForPlugin(item) {
   addMessage("system", `Making QA script ready for ${pluginName}...`);
   setBusy(true);
   try {
-    const result = await postJson("/api/qa/scripts/generate", { plugin: pluginName });
+    const result = await postJson("/api/qa/scripts/generate", {
+      plugin: pluginName,
+      conversationId: activeConversationId,
+    });
     const script = result.script || {};
     const next = script.testCases?.[script.runState?.nextIndex || 0]?.title || "No pending test";
     addMessage("assistant", [
@@ -269,6 +272,7 @@ async function generateQaScriptForPlugin(item) {
       `Next recommended test: ${next}`,
       `Draft file: \`${script.path || "memory/qa-scripts"}\``,
     ].join("\n"));
+    addMessage("system", `${result.qaSession?.pluginName || pluginName} QA is now locked to this chat. Open a new chat for normal support replies or other actions.`);
     await loadQaScripts();
   } catch (error) {
     addMessage("system", `QA script generation failed: ${error.message}`);
@@ -289,7 +293,7 @@ async function runQaScriptStep(item) {
       conversationId: activeConversationId,
     });
     addMessage("assistant", formatQaRunResult(result));
-    addMessage("system", `QA mode is now active for ${result.qaSession?.pluginName || pluginName}. Every prompt in this chat will be treated as testing context until you say "stop testing".`);
+    addMessage("system", `${result.qaSession?.pluginName || pluginName} QA is now locked to this chat. Open a new chat for normal support replies or other actions.`);
     await loadQaScripts();
   } catch (error) {
     addMessage("system", `QA test failed: ${error.message}`);
