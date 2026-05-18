@@ -10,7 +10,7 @@ import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { localImageUrl, saveImageAttachments } from "../src/imageInputs.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listPluginDirectories } from "../src/tools/filesystem.js";
-import { generateQaScript, listQaScripts, promoteQaScript, runNextQaScriptStep } from "../src/tools/qaScripts.js";
+import { generateQaScript, listQaScripts, promoteQaScript, runNextQaScriptStep, runQaPromptScenario } from "../src/tools/qaScripts.js";
 import { activateTheme, changePluginStatus, getWordPressSiteSummary, listThemes } from "../src/tools/wordpress.js";
 import {
   detectWordPressAction,
@@ -466,6 +466,20 @@ function addQaReportUrls(result) {
 
 async function maybeRunQaScriptFromChat(message, conversationId, activity) {
   const activeSession = getQaSession(conversationId);
+  if (activeSession && !isQaContinuationPrompt(message, activeSession)) {
+    activity("test", `Creating QA scenario for ${activeSession.pluginName}`);
+    const result = addGeneratedQaStepUrls(await runQaPromptScenario(config, {
+      plugin: activeSession.pluginName,
+      prompt: message,
+      activity,
+    }));
+    rememberQaSession(conversationId, result);
+    return {
+      doneMessage: "QA scenario finished",
+      text: formatGeneratedQaRunResult(result),
+    };
+  }
+
   const match = await matchQaContinuation(message, activeSession);
   if (!match) {
     return null;
@@ -485,6 +499,18 @@ async function maybeRunQaScriptFromChat(message, conversationId, activity) {
   return {
     text: formatGeneratedQaRunResult(result),
   };
+}
+
+function isQaContinuationPrompt(message, activeSession = null) {
+  const normalizedMessage = normalizeForMatch(message);
+  if (!normalizedMessage) {
+    return false;
+  }
+
+  return (
+    /^(continue|next|run next|run the next test|continue qa|continue test)$/.test(normalizedMessage) ||
+    Boolean(activeSession?.nextTest && normalizeForMatch(activeSession.nextTest) === normalizedMessage)
+  );
 }
 
 async function matchQaContinuation(message, activeSession = null) {

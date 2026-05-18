@@ -158,6 +158,62 @@ export async function runNextQaScriptStep(config, { plugin = "", testId = "", ac
   };
 }
 
+export async function runQaPromptScenario(config, { plugin = "", prompt = "", activity = null } = {}) {
+  const script = plugin ? readRequiredScript(config, plugin) : readMostRecentScript();
+  if (!script) {
+    throw new Error(plugin ? `No QA script is ready for "${plugin}". Generate it first.` : "No QA script is ready yet.");
+  }
+
+  const testCase = buildPromptScenarioTestCase(script, prompt);
+  emitActivity(activity, "test", `Running QA scenario for ${script.plugin.name}`);
+  const report = await runQaSteps(config, {
+    recipe: {
+      id: `${script.id}/${testCase.id}`,
+      name: testCase.title,
+      product: script.plugin.name,
+      area: testCase.area,
+      risk: testCase.risk,
+      path: script.path || "",
+      description: testCase.expectedResult,
+      userPrompt: prompt,
+    },
+    steps: testCase.steps,
+    reportSlug: `${script.id}-${testCase.id}`,
+    activity,
+  });
+
+  const now = new Date().toISOString();
+  const completedItem = {
+    testId: testCase.id,
+    title: testCase.title,
+    status: report.status,
+    failure: report.failure || "",
+    reportPath: report.reportPath,
+    reportHtmlPath: report.reportHtmlPath,
+    screenshots: report.screenshots || [],
+    ranAt: now,
+    prompt,
+  };
+
+  const completed = script.runState?.completed || [];
+  completed.push(completedItem);
+  script.runState = {
+    nextIndex: script.runState?.nextIndex || 0,
+    completed,
+    lastRun: completedItem,
+  };
+  script.updatedAt = now;
+  writeScript(script);
+
+  return {
+    script,
+    testCase,
+    report,
+    nextTest: script.testCases?.[script.runState.nextIndex] || null,
+    promptScenario: true,
+  };
+}
+
 export function promoteQaScript(config, { plugin = "" } = {}) {
   const script = readRequiredScript(config, plugin);
   const recipeDir = path.join(RECIPES_ROOT, "generated");
@@ -283,6 +339,68 @@ function collectRelatedAdminPages(smoke) {
   }
 
   return pages.slice(0, 5);
+}
+
+function buildPromptScenarioTestCase(script, prompt) {
+  const promptText = String(prompt || "").trim();
+  const title = `QA scenario: ${promptText ? promptText.slice(0, 80) : script.plugin.name}`;
+  const selectedUrl = script.sources?.adminDiscovery?.selectedAdminPage?.href || "";
+  const selectedText = script.sources?.adminDiscovery?.selectedAdminPage?.text || script.plugin.name;
+  const relatedPages = selectScenarioPages(script, promptText);
+  const steps = [
+    { action: "login_admin" },
+    { action: "go_to", path: selectedUrl || `plugins.php?s=${encodeURIComponent(script.plugin.name)}` },
+    { action: "screenshot", name: `${script.plugin.name} QA scenario start` },
+    ...relatedPages.flatMap((page) => [
+      { action: "go_to", path: page.href },
+      { action: "screenshot", name: `${script.plugin.name} scenario ${page.text}` },
+    ]),
+  ];
+
+  return {
+    id: `prompt-${Date.now()}-${safeSlug(promptText || script.plugin.name).slice(0, 40)}`,
+    title,
+    area: "prompt-driven-qa",
+    risk: "low",
+    source: "chat prompt",
+    expectedResult: [
+      `Prompt-driven QA scenario for ${script.plugin.name}.`,
+      promptText ? `User prompt: ${promptText}` : "",
+      `The agent inspected the plugin's ${selectedText} area and any matching safe related admin pages.`,
+      "This scenario is intentionally read-only and captures screenshots plus browser diagnostics.",
+    ].filter(Boolean).join(" "),
+    screenshotRequired: true,
+    steps: steps.filter((step) => step.action !== "go_to" || step.path),
+  };
+}
+
+function selectScenarioPages(script, prompt) {
+  const promptWords = normalizeWords(prompt);
+  const selectedUrl = script.sources?.adminDiscovery?.selectedAdminPage?.href || "";
+  const seen = new Set([selectedUrl]);
+  const pages = [];
+
+  for (const link of script.sources?.adminDiscovery?.exploredLinks || []) {
+    const href = link.href || "";
+    if (!href || seen.has(href)) continue;
+    const haystack = normalizeWords(`${link.text || ""} ${link.title || ""} ${href}`);
+    const score = promptWords.length
+      ? promptWords.reduce((sum, word) => sum + (haystack.some((item) => item.includes(word) || word.includes(item)) ? 1 : 0), 0)
+      : 0;
+    pages.push({
+      text: link.text || link.title || "related page",
+      href,
+      score,
+    });
+    seen.add(href);
+  }
+
+  const matched = pages
+    .filter((page) => page.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+
+  return (matched.length ? matched : pages.slice(0, 2)).map(({ text, href }) => ({ text, href }));
 }
 
 function findDocSources(config, plugin) {
