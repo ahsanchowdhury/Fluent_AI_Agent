@@ -474,6 +474,13 @@ async function runRecipeStep(page, config, step, context) {
     return stepResult(context.index, action, `Clicked ${step.text || step.label}`);
   }
 
+  if (action === "click_optional") {
+    const target = step.text || step.label || "";
+    const clicked = await clickByTextOptional(page, target);
+    await page.waitForLoadState("networkidle", { timeout: 8000 }).catch(() => null);
+    return stepResult(context.index, action, clicked ? `Clicked ${target}` : `Optional target not found: ${target}`);
+  }
+
   if (action === "fill") {
     await fillField(page, step);
     return stepResult(context.index, action, `Filled ${step.label || step.selector}`);
@@ -746,6 +753,30 @@ async function clickByText(page, text) {
   }
 
   await page.getByText(text, { exact: false }).first().click({ timeout: 10000 });
+}
+
+async function clickByTextOptional(page, text) {
+  const target = String(text || "").trim();
+  if (!target) {
+    return false;
+  }
+
+  const escaped = escapeRegExp(target);
+  const locators = [
+    page.getByRole("tab", { name: new RegExp(escaped, "i") }).first(),
+    page.getByRole("button", { name: new RegExp(escaped, "i") }).first(),
+    page.getByRole("link", { name: new RegExp(escaped, "i") }).first(),
+    page.getByText(target, { exact: false }).first(),
+  ];
+
+  for (const locator of locators) {
+    if (await locator.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await locator.click({ timeout: 8000 }).catch(() => null);
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function fillField(page, step) {

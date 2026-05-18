@@ -158,13 +158,17 @@ export async function runNextQaScriptStep(config, { plugin = "", testId = "", ac
   };
 }
 
-export async function runQaPromptScenario(config, { plugin = "", prompt = "", activity = null } = {}) {
+export function getQaScriptForPlugin(config, { plugin = "" } = {}) {
+  return plugin ? readRequiredScript(config, plugin) : readMostRecentScript();
+}
+
+export async function runQaPromptScenario(config, { plugin = "", prompt = "", scenarioPlan = null, activity = null } = {}) {
   const script = plugin ? readRequiredScript(config, plugin) : readMostRecentScript();
   if (!script) {
     throw new Error(plugin ? `No QA script is ready for "${plugin}". Generate it first.` : "No QA script is ready yet.");
   }
 
-  const testCase = buildPromptScenarioTestCase(script, prompt);
+  const testCase = buildPromptScenarioTestCase(script, prompt, scenarioPlan);
   emitActivity(activity, "test", `Running QA scenario for ${script.plugin.name}`);
   const report = await runQaSteps(config, {
     recipe: {
@@ -176,6 +180,7 @@ export async function runQaPromptScenario(config, { plugin = "", prompt = "", ac
       path: script.path || "",
       description: testCase.expectedResult,
       userPrompt: prompt,
+      scenarioPlan,
     },
     steps: testCase.steps,
     reportSlug: `${script.id}-${testCase.id}`,
@@ -193,6 +198,7 @@ export async function runQaPromptScenario(config, { plugin = "", prompt = "", ac
     screenshots: report.screenshots || [],
     ranAt: now,
     prompt,
+    scenarioPlan,
   };
 
   const completed = script.runState?.completed || [];
@@ -341,12 +347,15 @@ function collectRelatedAdminPages(smoke) {
   return pages.slice(0, 5);
 }
 
-function buildPromptScenarioTestCase(script, prompt) {
+function buildPromptScenarioTestCase(script, prompt, scenarioPlan = null) {
   const promptText = String(prompt || "").trim();
-  const title = `QA scenario: ${promptText ? promptText.slice(0, 80) : script.plugin.name}`;
+  const title = scenarioPlan?.title
+    ? `QA scenario: ${String(scenarioPlan.title).slice(0, 90)}`
+    : `QA scenario: ${promptText ? promptText.slice(0, 80) : script.plugin.name}`;
   const selectedUrl = script.sources?.adminDiscovery?.selectedAdminPage?.href || "";
   const selectedText = script.sources?.adminDiscovery?.selectedAdminPage?.text || script.plugin.name;
-  const relatedPages = selectScenarioPages(script, promptText);
+  const relatedPages = selectScenarioPages(script, promptText, scenarioPlan);
+  const safeClicks = getSafeScenarioClicks(scenarioPlan);
   const steps = [
     { action: "login_admin" },
     { action: "go_to", path: selectedUrl || `plugins.php?s=${encodeURIComponent(script.plugin.name)}` },
@@ -354,6 +363,10 @@ function buildPromptScenarioTestCase(script, prompt) {
     ...relatedPages.flatMap((page) => [
       { action: "go_to", path: page.href },
       { action: "screenshot", name: `${script.plugin.name} scenario ${page.text}` },
+      ...safeClicks.flatMap((click) => [
+        { action: "click_optional", text: click, label: `Try safe interaction: ${click}` },
+        { action: "screenshot", name: `${script.plugin.name} after ${click}` },
+      ]),
     ]),
   ];
 
@@ -366,6 +379,7 @@ function buildPromptScenarioTestCase(script, prompt) {
     expectedResult: [
       `Prompt-driven QA scenario for ${script.plugin.name}.`,
       promptText ? `User prompt: ${promptText}` : "",
+      scenarioPlan?.goal ? `Interpreted goal: ${scenarioPlan.goal}` : "",
       `The agent inspected the plugin's ${selectedText} area and any matching safe related admin pages.`,
       "This scenario is intentionally read-only and captures screenshots plus browser diagnostics.",
     ].filter(Boolean).join(" "),
@@ -374,8 +388,15 @@ function buildPromptScenarioTestCase(script, prompt) {
   };
 }
 
-function selectScenarioPages(script, prompt) {
-  const promptWords = normalizeWords(prompt);
+function selectScenarioPages(script, prompt, scenarioPlan = null) {
+  const planText = [
+    prompt,
+    scenarioPlan?.goal || "",
+    ...(scenarioPlan?.focusTerms || []),
+    ...(scenarioPlan?.adminPageQueries || []),
+    ...(scenarioPlan?.expectedEvidence || []),
+  ].join(" ");
+  const promptWords = normalizeWords(planText);
   const selectedUrl = script.sources?.adminDiscovery?.selectedAdminPage?.href || "";
   const seen = new Set([selectedUrl]);
   const pages = [];
@@ -401,6 +422,13 @@ function selectScenarioPages(script, prompt) {
     .slice(0, 3);
 
   return (matched.length ? matched : pages.slice(0, 2)).map(({ text, href }) => ({ text, href }));
+}
+
+function getSafeScenarioClicks(scenarioPlan) {
+  const unsafe = /\b(delete|remove|trash|deactivate|activate|disconnect|reset|clear|sync|send|publish|import|export|install|uninstall|migrate|upgrade|purchase|pay|submit|save|update|create)\b/i;
+  return [...new Set((scenarioPlan?.safeClicks || []).map((item) => String(item || "").trim()).filter(Boolean))]
+    .filter((item) => !unsafe.test(item))
+    .slice(0, 2);
 }
 
 function findDocSources(config, plugin) {

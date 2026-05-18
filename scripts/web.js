@@ -10,7 +10,7 @@ import { getConfig, loadEnv, maskSecret } from "../src/env.js";
 import { localImageUrl, saveImageAttachments } from "../src/imageInputs.js";
 import { createAgentResponse, createOpenAIClient } from "../src/openaiClient.js";
 import { listPluginDirectories } from "../src/tools/filesystem.js";
-import { generateQaScript, listQaScripts, promoteQaScript, runNextQaScriptStep, runQaPromptScenario } from "../src/tools/qaScripts.js";
+import { generateQaScript, getQaScriptForPlugin, listQaScripts, promoteQaScript, runNextQaScriptStep, runQaPromptScenario } from "../src/tools/qaScripts.js";
 import { activateTheme, changePluginStatus, getWordPressSiteSummary, listThemes } from "../src/tools/wordpress.js";
 import {
   detectWordPressAction,
@@ -467,10 +467,14 @@ function addQaReportUrls(result) {
 async function maybeRunQaScriptFromChat(message, conversationId, activity) {
   const activeSession = getQaSession(conversationId);
   if (activeSession && !isQaContinuationPrompt(message, activeSession)) {
-    activity("test", `Creating QA scenario for ${activeSession.pluginName}`);
+    activity("test", `Understanding QA request for ${activeSession.pluginName}`);
+    const script = getQaScriptForPlugin(config, { plugin: activeSession.pluginName });
+    const scenarioPlan = await buildQaScenarioPlan(message, activeSession, script, activity);
+    activity("test", `Running scenario: ${scenarioPlan.title || message}`);
     const result = addGeneratedQaStepUrls(await runQaPromptScenario(config, {
       plugin: activeSession.pluginName,
       prompt: message,
+      scenarioPlan,
       activity,
     }));
     rememberQaSession(conversationId, result);
@@ -499,6 +503,79 @@ async function maybeRunQaScriptFromChat(message, conversationId, activity) {
   return {
     text: formatGeneratedQaRunResult(result),
   };
+}
+
+async function buildQaScenarioPlan(message, activeSession, script, activity) {
+  const adminPages = [
+    script?.sources?.adminDiscovery?.selectedAdminPage,
+    ...(script?.sources?.adminDiscovery?.exploredLinks || []),
+  ].filter(Boolean).map((page) => ({
+    text: page.text || page.title || activeSession.pluginName,
+    href: page.href || "",
+    title: page.title || "",
+  })).slice(0, 12);
+
+  try {
+    const response = await client.responses.create({
+      model: config.openaiModel,
+      instructions: [
+        "You convert a user's QA request into a safe, executable WordPress plugin QA scenario plan.",
+        `The current chat is locked to plugin: ${activeSession.pluginName}.`,
+        "Return only valid JSON. No markdown.",
+        "The plan must stay focused on the locked plugin.",
+        "Use the available admin pages to choose the most relevant areas.",
+        "Only include low-risk read-only interactions. Do not include save, submit, delete, activate, deactivate, import, export, payment, email sending, or install actions.",
+        "safeClicks may include labels for tabs, filters, links, or read-only buttons, but never destructive or state-changing actions.",
+        "JSON shape: {\"title\":\"short test title\",\"goal\":\"what to verify\",\"focusTerms\":[\"terms\"],\"adminPageQueries\":[\"matching page/menu words\"],\"safeClicks\":[\"optional visible labels\"],\"expectedEvidence\":[\"what should be visible or captured\"]}",
+      ].join("\n"),
+      input: JSON.stringify({
+        plugin: activeSession.pluginName,
+        pluginFile: activeSession.pluginFile,
+        userRequest: message,
+        availableAdminPages: adminPages,
+      }, null, 2),
+    });
+
+    const plan = parseJsonObject(response.output_text || "");
+    activity?.("test", `Planned QA scenario: ${plan.title || "Untitled scenario"}`);
+    return normalizeQaScenarioPlan(plan, message);
+  } catch (error) {
+    activity?.("test", `QA planning fallback: ${error.message}`);
+    return normalizeQaScenarioPlan({}, message);
+  }
+}
+
+function normalizeQaScenarioPlan(plan, message) {
+  const fallbackTitle = String(message || "Prompt-driven QA scenario").replace(/\s+/g, " ").trim().slice(0, 90);
+  return {
+    title: String(plan?.title || fallbackTitle || "Prompt-driven QA scenario").trim(),
+    goal: String(plan?.goal || message || "Verify the requested behavior").trim(),
+    focusTerms: normalizePlanList(plan?.focusTerms),
+    adminPageQueries: normalizePlanList(plan?.adminPageQueries),
+    safeClicks: normalizePlanList(plan?.safeClicks),
+    expectedEvidence: normalizePlanList(plan?.expectedEvidence),
+  };
+}
+
+function normalizePlanList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 8);
+}
+
+function parseJsonObject(value) {
+  const text = String(value || "").trim();
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first === -1 || last === -1 || last <= first) {
+      throw _error;
+    }
+    return JSON.parse(text.slice(first, last + 1));
+  }
 }
 
 function isQaContinuationPrompt(message, activeSession = null) {
