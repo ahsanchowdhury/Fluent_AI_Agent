@@ -119,9 +119,7 @@ export async function runQaSteps(config, { recipe, steps: recipeSteps, reportSlu
     emitActivity(activity, "error", `QA recipe failed: ${error.message}`);
   }
 
-  const finalScreenshotPath = path.join(screenshotDir, `${Date.now()}-qa-final.png`);
-  await page.screenshot({ path: finalScreenshotPath, fullPage: true }).catch(() => null);
-  screenshots.push({ name: "final", path: finalScreenshotPath });
+  const finalScreenshotPath = await captureQaScreenshot(page, screenshotDir, "final", screenshots, activity).catch(() => "");
   await browser.close().catch(() => null);
 
   const report = {
@@ -501,9 +499,7 @@ async function runRecipeStep(page, config, step, context) {
 
   if (action === "screenshot") {
     const name = step.name || `step-${context.index + 1}`;
-    const screenshotPath = path.join(context.screenshotDir, `${Date.now()}-qa-${safeName(name)}.png`);
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-    context.screenshots.push({ name, path: screenshotPath });
+    const screenshotPath = await captureQaScreenshot(page, context.screenshotDir, name, context.screenshots, context.activity);
     return stepResult(context.index, action, `Captured screenshot: ${name}`, { screenshotPath });
   }
 
@@ -697,11 +693,63 @@ function findSafeAdminLinks(links, currentHref, plugin) {
     });
 }
 
-async function captureQaScreenshot(page, screenshotDir, name, screenshots) {
+async function captureQaScreenshot(page, screenshotDir, name, screenshots, activity = null) {
+  await waitForQaVisualReady(page, activity);
   const screenshotPath = path.join(screenshotDir, `${Date.now()}-qa-${safeName(name)}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
   screenshots.push({ name, path: screenshotPath });
   return screenshotPath;
+}
+
+async function waitForQaVisualReady(page, activity = null) {
+  emitActivity(activity, "test", "Waiting for page content to finish loading");
+  await page.waitForLoadState("domcontentloaded", { timeout: 15000 }).catch(() => null);
+  await page.waitForLoadState("networkidle", { timeout: 15000 }).catch(() => null);
+  await page.waitForTimeout(700);
+
+  await page.waitForFunction(() => {
+    const visible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const loadingSelectors = [
+      ".skeleton",
+      ".skeleton-loader",
+      ".loading",
+      ".is-loading",
+      ".spinner",
+      ".components-spinner",
+      ".el-loading-mask",
+      ".nprogress-busy",
+      "[aria-busy='true']",
+      "[class*='skeleton']",
+      "[class*='Skeleton']",
+      "[class*='loader']",
+      "[class*='Loader']",
+      "[class*='loading']",
+      "[class*='Loading']",
+    ];
+    const loaders = loadingSelectors.flatMap((selector) => [...document.querySelectorAll(selector)]).filter(visible);
+    const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+    return loaders.length === 0 && text.length > 20;
+  }, { timeout: 12000 }).catch(() => null);
+
+  const stable = await isPageTextStable(page).catch(() => false);
+  if (!stable) {
+    await page.waitForTimeout(1200);
+  }
+}
+
+async function isPageTextStable(page) {
+  const first = await visibleTextSignature(page);
+  await page.waitForTimeout(900);
+  const second = await visibleTextSignature(page);
+  return first === second;
+}
+
+async function visibleTextSignature(page) {
+  return page.evaluate(() => (document.body?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 2000));
 }
 
 function detectFatalSignals(summaries) {
