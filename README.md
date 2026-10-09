@@ -1,6 +1,19 @@
 # Local WordPress AI Agent
 
-This is a local-only AI agent for WordPress plugin development and debugging.
+An experimental, local-first AI assistant for WordPress plugin development,
+support investigation, and debugging. It combines safe code inspection,
+documentation memory, browser diagnostics, and an approval-based patch flow.
+
+> This project is designed for local development. It is not a hosted support
+> bot and should not be pointed at production credentials or customer data.
+
+## What makes it useful
+
+- inspect plugin files without exposing the whole workstation to the model
+- search indexed project documentation before answering support questions
+- collect browser, PHP, and WP-CLI diagnostics in one workflow
+- propose patches for review before anything is applied
+- use either a terminal launcher or a local web dashboard
 
 ## Goal
 
